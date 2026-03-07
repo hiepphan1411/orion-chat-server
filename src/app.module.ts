@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { FriendsModule } from './modules/friends/friends.module';
@@ -13,6 +15,18 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
 
 @Module({
   imports: [
+    TypeOrmModule.forRoot({
+      type: 'postgres',
+      host: 'localhost',
+      port: 5432,
+      username: 'postgres',
+      password: '123456789',
+      database: 'orion_chat',
+
+      autoLoadEntities: true,
+      synchronize: true,
+    }),
+
     AuthModule,
     UsersModule,
     FriendsModule,
