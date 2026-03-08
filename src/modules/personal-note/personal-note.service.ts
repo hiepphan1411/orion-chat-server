@@ -1,14 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-
-import { Notification } from './notification.schema';
+import { PersonalNote } from './personal-note.schema';
 
 @Injectable()
-export class NotificationService {
+export class PersonalNoteService {
   constructor(
-    @InjectModel(Notification.name)
-    private model: Model<Notification>,
+    @InjectModel(PersonalNote.name)
+    private model: Model<PersonalNote>,
   ) {}
 
   create(data: any) {

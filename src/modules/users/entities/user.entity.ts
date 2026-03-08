@@ -1,19 +1,45 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
-//Để test
+import { File } from 'src/modules/file/entities/file.entity';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+
 @Entity()
 export class User {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column()
-  username: string;
+  @PrimaryGeneratedColumn('uuid')
+  userId: string;
 
   @Column({ unique: true })
-  email: string;
+  phoneNumber: string;
 
   @Column()
-  password: string;
-  //Map quan hệ nếu có
-  //   @OneToMany(() => Message, (message) => message.user)
-  //   messages: Message[];
+  passwordHash: string;
+
+  @Column()
+  fullName: string;
+
+  @Column({ nullable: true })
+  birthDate: Date;
+
+  @Column({ unique: true, nullable: true })
+  email: string;
+
+  @Column({ nullable: true })
+  avatarUrl: string;
+
+  @Column({ nullable: true })
+  coverImage: string;
+
+  @Column({ default: false })
+  isOnline: boolean;
+
+  @Column({ default: true })
+  showOnlineStatus: boolean;
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  @ManyToOne(() => File)
+  fileUser: File;
 }
+
+//Map quan hệ nếu có
+//   @OneToMany(() => Message, (message) => message.user)
+//   messages: Message[];
