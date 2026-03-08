@@ -12,6 +12,8 @@ import { NotesModule } from './modules/notes/notes.module';
 import { AiModule } from './modules/ai/ai.module';
 import { WorkhubModule } from './modules/workhub/workhub.module';
 import { StatisticsModule } from './modules/statistics/statistics.module';
+import { MongooseModule } from '@nestjs/mongoose';
+import { NotificationsModule } from './modules/notifications/notification.module';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
       autoLoadEntities: true,
       synchronize: true,
     }),
+    MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
 
     AuthModule,
     UsersModule,
@@ -38,6 +41,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     AiModule,
     WorkhubModule,
     StatisticsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
