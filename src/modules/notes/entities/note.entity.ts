@@ -38,6 +38,9 @@ export class PersonalNote {
   @Index()
   isPinned: boolean;
 
+  @Column({ name: 'folder_id', type: 'uuid', nullable: true })
+  folderId: string | null;
+
   @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
 

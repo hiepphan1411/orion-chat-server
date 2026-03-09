@@ -18,7 +18,7 @@ export class NoteCategory {
   @PrimaryGeneratedColumn('uuid')
   categoryId: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 50 })
   @Index()
   name: string;
 
