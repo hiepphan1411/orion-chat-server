@@ -11,6 +11,15 @@ import { TaskBoard } from './modules/task-board/entities/task-board.entity';
 import { Task } from './modules/task/entities/task.entity';
 import { User } from './modules/users/entities/user.entity';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
+import { Admin } from './modules/admin/entities/admin.entity';
+import { Report } from './modules/reports/entities/reports.entity';
+
+import { MessageModule } from './modules/message/message.module';
+import { CallModule } from './modules/call/call.module';
+import { AIChatSessionModule } from './modules/ai-chat-sesstion/ai-chat-sesstion.module';
+import { AIMessageModule } from './modules/ai-message/ai-message.module';
+import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { NotificationModule } from './modules/notifications/notification.module';
 
 @Module({
   imports: [
@@ -29,6 +38,9 @@ import { PersonalNoteModule } from './modules/personal-note/personal-note.module
         TaskList,
         Workspace,
         WorkspaceMember,
+        Report,
+        Admin,
+        Conversation,
       ],
       autoLoadEntities: true,
       synchronize: true,
@@ -37,6 +49,11 @@ import { PersonalNoteModule } from './modules/personal-note/personal-note.module
     UsersModule,
     TaskModule,
     PersonalNoteModule,
+    NotificationModule,
+    MessageModule,
+    CallModule,
+    AIChatSessionModule,
+    AIMessageModule,
   ],
 })
 export class AppModule {}

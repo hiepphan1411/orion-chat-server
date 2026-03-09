@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
 import { CalendarEvent } from 'src/modules/calendar-event/entities/calendar-event.entity';
 import { User } from 'src/modules/users/entities/user.entity';

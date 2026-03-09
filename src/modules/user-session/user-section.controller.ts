@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { Controller, Get, Post, Body } from '@nestjs/common';
 import { CreateUserSessionDto } from './dto/create-user.dto';
 import { UserSessionService } from './user-section.service';

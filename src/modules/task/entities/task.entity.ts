@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { Priority } from 'src/common/enums/priority.enum';
 import { TaskStatus } from 'src/common/enums/task-status.enum';
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';

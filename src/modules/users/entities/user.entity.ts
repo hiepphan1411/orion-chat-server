@@ -1,5 +1,14 @@
 import { File } from 'src/modules/file/entities/file.entity';
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import { Report } from 'src/modules/reports/entities/reports.entity';
+
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  OneToMany,
+  CreateDateColumn,
+} from 'typeorm';
 
 @Entity()
 export class User {
@@ -38,6 +47,12 @@ export class User {
 
   @ManyToOne(() => File)
   fileUser: File;
+
+  @OneToMany(() => Report, (report) => report.user)
+  reports: Report[];
+
+  @CreateDateColumn()
+  createdAt: Date;
 }
 
 //Map quan hệ nếu có
