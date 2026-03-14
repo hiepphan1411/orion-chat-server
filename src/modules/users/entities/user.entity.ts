@@ -27,6 +27,9 @@ export class User {
   @Column({ nullable: true })
   birthDate: Date;
 
+  @Column({ nullable: true })
+  gender: string;
+
   @Column({ unique: true, nullable: true })
   email: string;
 
@@ -54,7 +57,3 @@ export class User {
   @CreateDateColumn()
   createdAt: Date;
 }
-
-//Map quan hệ nếu có
-//   @OneToMany(() => Message, (message) => message.user)
-//   messages: Message[];
