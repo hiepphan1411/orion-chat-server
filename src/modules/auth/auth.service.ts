@@ -401,10 +401,12 @@ export class AuthService {
         message: 'Đăng nhập thành công',
         data: {
           token,
+          userId: user.userId,
           phoneNumber: user.phoneNumber,
           fullName: user.fullName,
           birthDate: user.birthDate,
           gender: user.gender,
+          avatarUrl: user.avatarUrl,
           loginTime: new Date().toISOString(),
         },
         timestamp: new Date().toISOString(),

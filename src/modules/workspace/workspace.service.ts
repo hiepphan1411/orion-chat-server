@@ -27,47 +27,11 @@ export class WorkspaceService {
    * Tạo workspace mới
    * - Tự động thêm owner vào bảng workspace_member với role OWNER
    */
-  // async create(dto: CreateWorkspaceDto) {
-  //   const owner = await this.userRepo.findOne({
-  //     where: { userId: dto.ownerId },
-  //   });
-  //   if (!owner) throw new BadRequestException('Owner not found');
-
-  //   const workspace = this.workspaceRepo.create({
-  //     workspaceName: dto.workspaceName,
-  //     description: dto.description,
-  //     type: dto.type,
-  //     avatarUrl: dto.avatarUrl,
-  //     color: dto.color ?? '#0d9488',
-  //     isPublic: dto.isPublic ?? false,
-  //     memberLimit: dto.memberLimit ?? 50,
-  //     owner,
-  //   });
-  //   const saved = await this.workspaceRepo.save(workspace);
-
-  //   // Auto-add owner là thành viên đầu tiên
-  //   const member = this.memberRepo.create({
-  //     workspace: saved,
-  //     user: owner,
-  //     role: WorkspaceRole.OWNER,
-  //   });
-  //   await this.memberRepo.save(member);
-
-  //   return this.findOne(saved.workspaceId);
-  // }
-
-  //Hàm Tạo để test
-  // src/modules/workspace/workspace.service.ts
   async create(dto: CreateWorkspaceDto) {
-    const users = await this.userRepo.find({
-      order: { createdAt: 'ASC' },
-      take: 1,
+    const owner = await this.userRepo.findOne({
+      where: { userId: dto.ownerId },
     });
-    const owner = users[0];
-
-    if (!owner) {
-      throw new BadRequestException('No user found to assign as owner');
-    }
+    if (!owner) throw new BadRequestException('Owner not found');
 
     const workspace = this.workspaceRepo.create({
       workspaceName: dto.workspaceName,
@@ -79,9 +43,9 @@ export class WorkspaceService {
       memberLimit: dto.memberLimit ?? 50,
       owner,
     });
-
     const saved = await this.workspaceRepo.save(workspace);
 
+    // Auto-add owner là thành viên đầu tiên
     const member = this.memberRepo.create({
       workspace: saved,
       user: owner,
