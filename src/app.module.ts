@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 
-import { UsersModule } from './modules/users/users.module';
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
 import { NotificationModule } from './modules/notifications/notification.module';
@@ -33,6 +32,8 @@ import { SubTask } from './modules/sub-task/entities/sub-task.entity';
 import { Comment } from './modules/comment/entities/comment.entity';
 import { Attachment } from './modules/attachment/entities/attachment.entity';
 import { ActivityLog } from './modules/activity-log/entities/activity-log.entity';
+import { PersonalNote } from './modules/notes/entities/note.entity';
+import { NoteCategory } from './modules/notes/entities/note-category.entity';
 
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { WorkspaceMemberModule } from './modules/workspace-member/workspace-member.module';
@@ -40,6 +41,7 @@ import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
 import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
@@ -72,6 +74,8 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
         Comment,
         Attachment,
         ActivityLog,
+        PersonalNote,
+        NoteCategory,
       ],
       autoLoadEntities: true,
       synchronize: true,
@@ -80,8 +84,10 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
     // MongoDB
     MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
 
+    // Common Module (provides JwtAuthGuard globally)
+    CommonModule,
+
     // Modules
-    UsersModule,
     AuthModule,
     TaskModule,
     PersonalNoteModule,
