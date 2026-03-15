@@ -14,25 +14,6 @@ import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
-/**
- * API Workspace
- *
- * POST   /workspaces                → Tạo workspace mới (body: CreateWorkspaceDto)
- *   - Tự động thêm ownerId vào members với role OWNER
- *   - Trả về workspace đầy đủ kèm members, boards
- *
- * GET    /workspaces?userId=xxx     → Lấy tất cả workspace mà user tham gia
- *   - Query param: userId (bắt buộc) - ID của user cần lấy workspace
- *   - Trả về mảng workspace kèm members, boards
- *
- * GET    /workspaces/:id            → Lấy chi tiết 1 workspace
- *   - Trả về workspace kèm owner, members (user), boards (columns)
- *
- * PATCH  /workspaces/:id            → Cập nhật workspace (partial update)
- *   - Body: bất kỳ field nào của CreateWorkspaceDto
- *
- * DELETE /workspaces/:id            → Xóa workspace (cascade xóa members, boards)
- */
 @Controller('workspaces')
 @UseGuards(JwtAuthGuard)
 export class WorkspaceController {
@@ -61,5 +42,15 @@ export class WorkspaceController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.workspaceService.remove(id);
+  }
+
+  @Get(':id/workload')
+  getWorkload(@Param('id') id: string) {
+    return this.workspaceService.getWorkload(id);
+  }
+
+  @Get(':id/reports')
+  getReports(@Param('id') id: string) {
+    return this.workspaceService.getReports(id);
   }
 }

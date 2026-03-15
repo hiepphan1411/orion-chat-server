@@ -3,11 +3,23 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Workspace } from './entities/workspace.entity';
 import { WorkspaceMember } from '../workspace-member/entities/workspace-member.entity';
 import { User } from '../users/entities/user.entity';
+import { Task } from '../task/entities/task.entity';
+import { TaskAssignee } from '../task/entities/task-assignee.entity';
+import { TaskBoard } from '../task-board/entities/task-board.entity';
 import { WorkspaceService } from './workspace.service';
 import { WorkspaceController } from './workspace.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Workspace, WorkspaceMember, User])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Workspace,
+      WorkspaceMember,
+      User,
+      Task,
+      TaskAssignee,
+      TaskBoard,
+    ]),
+  ],
   controllers: [WorkspaceController],
   providers: [WorkspaceService],
   exports: [WorkspaceService],
