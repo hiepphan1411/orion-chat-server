@@ -9,6 +9,7 @@ async function bootstrap() {
     origin: [
       'http://localhost:5173',
       'http://localhost:3000',
+      'http://localhost:5174',
       'http://localhost:3001',
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -16,12 +17,12 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // app.useGlobalPipes(
-  //   new ValidationPipe({
-  //     transform: true,
-  //     whitelist: true,
-  //   }),
-  // );
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+    }),
+  );
 
   // app.enableCors();
 

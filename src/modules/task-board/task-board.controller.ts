@@ -6,10 +6,12 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { TaskBoardService } from './task-board.service';
 import { CreateTaskBoardDto } from './dto/create-task-board.dto';
 import { UpdateTaskBoardDto } from './dto/update-task-board.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Task Board
@@ -33,6 +35,7 @@ import { UpdateTaskBoardDto } from './dto/update-task-board.dto';
  *   - Cascade xóa columns, tasks
  */
 @Controller('workspaces/:workspaceId/boards')
+@UseGuards(JwtAuthGuard)
 export class TaskBoardController {
   constructor(private readonly boardService: TaskBoardService) {}
 

@@ -34,17 +34,17 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private generateJwtToken(phoneNumber: string): string {
+  private generateJwtToken(phoneNumber: string, userId: string): string {
     const jwtSecret = this.configService.get('JWT_SECRET') || 'your-secret-key';
     const jwtExpiresIn = this.configService.get('JWT_EXPIRES_IN') || '24h';
 
-    // Generate simple JWT token manually
     const header = Buffer.from(
       JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
     ).toString('base64');
     const payload = Buffer.from(
       JSON.stringify({
         phoneNumber,
+        userId,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + this.parseExpiry(jwtExpiresIn),
       }),
@@ -82,7 +82,6 @@ export class AuthService {
 
   async sendOtp(phoneNumber: string) {
     try {
-      // Validate phone number
       if (!phoneNumber || phoneNumber.length < 10) {
         throw new BadRequestException('Số điện thoại không hợp lệ');
       }
@@ -94,12 +93,10 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại đã tồn tại');
       }
 
-      // Delete old OTP for this phone number
       await this.otpRepo.delete({ phoneNumber });
 
       const otp = this.generateOtp();
 
-      // Log to console in development
       console.log(`\n${'='.repeat(60)}`);
       console.log(`OTP CONSOLE OUTPUT`);
       console.log(`${'='.repeat(60)}`);
@@ -383,7 +380,7 @@ export class AuthService {
       this.logger.log(`Login successful for: ${phoneNumber}`);
 
       // Generate JWT token
-      const token = this.generateJwtToken(phoneNumber);
+      const token = this.generateJwtToken(phoneNumber, user.userId);
 
       // Log to console in development
       console.log(`\n${'='.repeat(60)}`);

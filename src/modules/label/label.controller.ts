@@ -6,10 +6,12 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { LabelService } from './label.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Labels
@@ -27,6 +29,7 @@ import { UpdateLabelDto } from './dto/update-label.dto';
  * DELETE /workspaces/:workspaceId/labels/:id         → Xóa label
  */
 @Controller('workspaces/:workspaceId/labels')
+@UseGuards(JwtAuthGuard)
 export class LabelController {
   constructor(private readonly labelService: LabelService) {}
 

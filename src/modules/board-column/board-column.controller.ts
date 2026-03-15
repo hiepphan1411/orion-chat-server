@@ -1,7 +1,16 @@
-import { Controller, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+} from '@nestjs/common';
 import { BoardColumnService } from './board-column.service';
 import { CreateBoardColumnDto } from './dto/create-board-column.dto';
 import { UpdateBoardColumnDto } from './dto/update-board-column.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Board Columns
@@ -20,6 +29,7 @@ import { UpdateBoardColumnDto } from './dto/update-board-column.dto';
  *   - Body: { columnIds: string[] } - mảng columnId theo thứ tự mong muốn
  */
 @Controller('boards/:boardId/columns')
+@UseGuards(JwtAuthGuard)
 export class BoardColumnController {
   constructor(private readonly columnService: BoardColumnService) {}
 

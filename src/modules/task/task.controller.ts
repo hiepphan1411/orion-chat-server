@@ -6,10 +6,12 @@ import {
   Param,
   Patch,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { TaskService } from './task.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto, MoveTaskDto } from './dto/update-task.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Tasks
@@ -43,6 +45,7 @@ import { UpdateTaskDto, MoveTaskDto } from './dto/update-task.dto';
  * DELETE /tasks/:id                              → Xóa task
  */
 @Controller()
+@UseGuards(JwtAuthGuard)
 export class TaskController {
   constructor(private readonly taskService: TaskService) {}
 

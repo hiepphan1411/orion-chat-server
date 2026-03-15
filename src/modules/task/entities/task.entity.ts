@@ -6,6 +6,10 @@ import { Label } from 'src/modules/label/entities/label.entity';
 import { TaskBoard } from 'src/modules/task-board/entities/task-board.entity';
 import { TaskAssignee } from 'src/modules/task/entities/task-assignee.entity';
 import { User } from 'src/modules/users/entities/user.entity';
+import { SubTask } from 'src/modules/sub-task/entities/sub-task.entity';
+import { Comment } from 'src/modules/comment/entities/comment.entity';
+import { Attachment } from 'src/modules/attachment/entities/attachment.entity';
+import { ActivityLog } from 'src/modules/activity-log/entities/activity-log.entity';
 import {
   Column,
   CreateDateColumn,
@@ -77,4 +81,16 @@ export class Task {
   @ManyToMany(() => Label)
   @JoinTable({ name: 'task_labels' })
   labels: Label[];
+
+  @OneToMany(() => SubTask, (st) => st.task)
+  subtasks: SubTask[];
+
+  @OneToMany(() => Comment, (c) => c.task)
+  comments: Comment[];
+
+  @OneToMany(() => Attachment, (a) => a.task)
+  attachments: Attachment[];
+
+  @OneToMany(() => ActivityLog, (al) => al.task)
+  activityLogs: ActivityLog[];
 }

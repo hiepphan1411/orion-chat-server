@@ -27,7 +27,7 @@ export class TaskService {
     private userRepo: Repository<User>,
   ) {}
 
-  // Relations dùng chung khi query task
+  // Quan hệ
   private readonly fullRelations = [
     'board',
     'column',
@@ -37,11 +37,21 @@ export class TaskService {
     'labels',
   ];
 
-  /**
-   * Tạo task mới trong board
-   * - Gán column, createdBy, assignees, labels nếu có
-   * - Tự động tính order (thêm vào cuối column)
-   */
+  private readonly detailRelations = [
+    ...this.fullRelations,
+    'subtasks',
+    'subtasks.children',
+    'subtasks.children.children',
+    'subtasks.assignee',
+    'subtasks.children.assignee',
+    'comments',
+    'comments.author',
+    'attachments',
+    'attachments.uploadedBy',
+    'activityLogs',
+    'activityLogs.user',
+  ];
+
   async create(boardId: string, dto: CreateTaskDto) {
     const board = await this.boardRepo.findOne({ where: { boardId } });
     if (!board) throw new NotFoundException('Board not found');
@@ -58,7 +68,6 @@ export class TaskService {
       });
     }
 
-    // Tính order cho task mới trong column
     let order = 0;
     if (column) {
       const count = await this.taskRepo.count({
@@ -67,7 +76,6 @@ export class TaskService {
       order = count;
     }
 
-    // Tìm labels nếu có
     let labels: Label[] = [];
     if (dto.labelIds?.length) {
       labels = await this.labelRepo.find({
@@ -90,7 +98,6 @@ export class TaskService {
     });
     const saved = await this.taskRepo.save(task);
 
-    // Thêm assignees nếu có
     if (dto.assigneeIds?.length) {
       for (const userId of dto.assigneeIds) {
         const user = await this.userRepo.findOne({ where: { userId } });
@@ -104,11 +111,6 @@ export class TaskService {
     return this.findOne(saved.taskId);
   }
 
-  /**
-   * Lấy tất cả tasks trong board
-   * - Kèm column, assignees, labels, createdBy
-   * - Sắp xếp theo order trong mỗi column
-   */
   async findByBoard(boardId: string) {
     return this.taskRepo.find({
       where: { board: { boardId } },
@@ -117,46 +119,32 @@ export class TaskService {
     });
   }
 
-  /**
-   * Lấy tất cả tasks (không filter board)
-   */
   findAll() {
     return this.taskRepo.find({
       relations: this.fullRelations,
     });
   }
 
-  /**
-   * Lấy chi tiết task theo ID
-   */
   async findOne(id: string) {
     const task = await this.taskRepo.findOne({
       where: { taskId: id },
-      relations: this.fullRelations,
+      relations: this.detailRelations,
     });
     if (!task) throw new NotFoundException('Task not found');
     return task;
   }
 
-  /**
-   * Cập nhật task
-   * - Cập nhật assignees và labels nếu có truyền vào
-   */
   async update(id: string, dto: UpdateTaskDto) {
     const task = await this.findOne(id);
 
-    // Cập nhật labels nếu có
     if (dto.labelIds) {
       task.labels = await this.labelRepo.find({
         where: { labelId: In(dto.labelIds) },
       });
     }
 
-    // Cập nhật assignees nếu có
     if (dto.assigneeIds) {
-      // Xóa assignees cũ
       await this.assigneeRepo.delete({ task: { taskId: id } });
-      // Thêm assignees mới
       for (const userId of dto.assigneeIds) {
         const user = await this.userRepo.findOne({ where: { userId } });
         if (user) {
@@ -166,7 +154,6 @@ export class TaskService {
       }
     }
 
-    // Cập nhật column nếu có
     if (dto.columnId) {
       const column = await this.columnRepo.findOne({
         where: { columnId: dto.columnId },
@@ -174,7 +161,6 @@ export class TaskService {
       if (column) task.column = column;
     }
 
-    // Cập nhật các field đơn giản
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description;
     if (dto.priority !== undefined) task.priority = dto.priority;
@@ -188,10 +174,6 @@ export class TaskService {
     return this.findOne(id);
   }
 
-  /**
-   * Di chuyển task sang column khác (kéo thả trên Kanban)
-   * - Cập nhật column, status, order
-   */
   async moveTask(id: string, dto: MoveTaskDto) {
     const task = await this.findOne(id);
 
@@ -208,9 +190,6 @@ export class TaskService {
     return this.findOne(id);
   }
 
-  /**
-   * Xóa task
-   */
   async remove(id: string) {
     const task = await this.findOne(id);
     return this.taskRepo.remove(task);

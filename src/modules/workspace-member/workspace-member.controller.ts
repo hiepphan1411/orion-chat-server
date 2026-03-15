@@ -6,10 +6,12 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { WorkspaceMemberService } from './workspace-member.service';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Thành viên Workspace
@@ -30,6 +32,7 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
  *   - Bảo vệ: không cho xóa OWNER cuối cùng
  */
 @Controller('workspaces/:workspaceId/members')
+@UseGuards(JwtAuthGuard)
 export class WorkspaceMemberController {
   constructor(private readonly memberService: WorkspaceMemberService) {}
 

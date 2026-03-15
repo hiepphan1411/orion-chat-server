@@ -30,25 +30,22 @@ export class CreateTaskDto {
   @IsDateString()
   dueDate?: string;
 
+  @IsOptional()
   @IsString()
-  boardId: string;
+  boardId?: string;
 
-  // bổ sung - column chứa task
   @IsOptional()
   @IsString()
   columnId?: string;
 
-  // bổ sung - người tạo task
   @IsString()
   createdById: string;
 
-  // bổ sung - danh sách userId được giao task
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   assigneeIds?: string[];
 
-  // bổ sung - danh sách labelId gắn vào task
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

@@ -7,10 +7,12 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { WorkspaceService } from './workspace.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 /**
  * API Workspace
@@ -32,6 +34,7 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
  * DELETE /workspaces/:id            → Xóa workspace (cascade xóa members, boards)
  */
 @Controller('workspaces')
+@UseGuards(JwtAuthGuard)
 export class WorkspaceController {
   constructor(private readonly workspaceService: WorkspaceService) {}
 
