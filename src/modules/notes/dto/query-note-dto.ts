@@ -1,5 +1,11 @@
-import { IsOptional, IsString, IsUUID, IsBoolean } from 'class-validator';
-// import { NoteCategory } from '../entities/note-category.entity';
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsBoolean,
+  IsNumber,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class QueryNoteDto {
   @IsOptional()
@@ -16,5 +22,16 @@ export class QueryNoteDto {
 
   @IsOptional()
   @IsBoolean()
-  pinnedOnly?: boolean;
+  @Type(() => Boolean)
+  isPinned?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  skip?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  take?: number;
 }

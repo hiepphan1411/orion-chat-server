@@ -16,6 +16,7 @@ import { SubTaskModule } from './modules/sub-task/sub-task.module';
 import { CommentModule } from './modules/comment/comment.module';
 import { AttachmentModule } from './modules/attachment/attachment.module';
 import { ActivityLogModule } from './modules/activity-log/activity-log.module';
+import { NotesModule } from './modules/notes/notes.module';
 
 import { WorkspaceMember } from './modules/workspace-member/entities/workspace-member.entity';
 import { Workspace } from './modules/workspace/entities/workspace.entity';
@@ -96,8 +97,6 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
     LabelModule,
     SubTaskModule,
     CommentModule,
-    AttachmentModule,
     ActivityLogModule,
-  ],
-})
-export class AppModule {}
+    NotesModule,
+],})
