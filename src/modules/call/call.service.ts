@@ -8,7 +8,10 @@ import { CallType } from 'src/common/enums/call-type.enum';
 export class CallService {
   constructor(@InjectModel(Call.name) private callModel: Model<CallDocument>) {}
 
-  async createCall(conversationId: string, callType: CallType): Promise<Call> {
+  async createCall(
+    conversationId: string,
+    callType: CallType,
+  ): Promise<CallDocument> {
     const newCall = new this.callModel({
       conversationId,
       callType,
@@ -19,7 +22,11 @@ export class CallService {
 
   async endCall(callId: string): Promise<Call | null> {
     return this.callModel
-      .findByIdAndUpdate(callId, { endTime: new Date() }, { new: true })
+      .findByIdAndUpdate(
+        callId,
+        { endTime: new Date() },
+        { returnDocument: 'after' },
+      )
       .exec();
   }
 

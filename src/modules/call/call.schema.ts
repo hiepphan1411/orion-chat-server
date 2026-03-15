@@ -7,8 +7,8 @@ export type CallDocument = Call & Document;
 
 @Schema({ timestamps: true })
 export class Call {
-  @Prop()
-  callId: string;
+  // MongoDB sẽ tự động tạo _id, không cần callId riêng
+  // Nếu muốn dùng _id: call._id.toString()
 
   // Conversation 1 - N Call
   @Prop({ required: true })

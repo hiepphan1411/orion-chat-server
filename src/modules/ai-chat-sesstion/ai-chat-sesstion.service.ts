@@ -35,7 +35,7 @@ export class AIChatSessionService {
     update: Partial<{ aiModel: string; systemPrompt: string }>,
   ): Promise<AIChatSession | null> {
     return this.sessionModel
-      .findByIdAndUpdate(sessionId, update, { new: true })
+      .findByIdAndUpdate(sessionId, update, { returnDocument: 'after' })
       .exec();
   }
 
