@@ -12,6 +12,7 @@ import { CallModule } from './modules/call/call.module';
 import { AIChatSessionModule } from './modules/ai-chat-sesstion/ai-chat-sesstion.module';
 import { AIMessageModule } from './modules/ai-message/ai-message.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { NotesModule } from './modules/notes/notes.module';
 
 import { WorkspaceMember } from './modules/workspace-member/entities/workspace-member.entity';
 import { Workspace } from './modules/workspace/entities/workspace.entity';
@@ -82,6 +83,7 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
     TaskBoardModule,
     BoardColumnModule,
     LabelModule,
+    NotesModule,
   ],
 })
 export class AppModule {}

@@ -57,13 +57,13 @@ export class CategoriesService {
   }
 
   /**
-   * Create new category
+   * tạo category mới
    */
   async create(
     userId: string,
     createCategoryDto: CreateCategoryDto,
   ): Promise<NoteCategory> {
-    // check duplicate name
+    // check trùng tên category trong cùng user
     const existing = await this.categoryRepository.findOne({
       where: { userId, name: createCategoryDto.name },
     });
@@ -85,7 +85,7 @@ export class CategoriesService {
   }
 
   /**
-   * get all categories of user
+   * lấy all categories của user, sắp xếp mặc định lên đầu, sau đó theo tên
    */
   async findAllByUser(userId: string): Promise<NoteCategory[]> {
     const categories = await this.categoryRepository.find({
@@ -93,7 +93,7 @@ export class CategoriesService {
       order: { isDefault: 'DESC', name: 'ASC' },
     });
 
-    // auto create default categories if new user
+    // tự động tạo default categories nếu user chưa có category nào
     if (categories.length === 0) {
       return await this.createDefaultCategories(userId);
     }
@@ -102,7 +102,7 @@ export class CategoriesService {
   }
 
   /**
-   * get one category
+   * lấy 1 category theo id, đảm bảo category thuộc về user
    */
   async findOne(categoryId: string, userId: string): Promise<NoteCategory> {
     const category = await this.categoryRepository.findOne({
@@ -117,7 +117,7 @@ export class CategoriesService {
   }
 
   /**
-   * get category by name
+   * lấy category theo name
    */
   async findByName(name: string, userId: string): Promise<NoteCategory | null> {
     return await this.categoryRepository.findOne({
@@ -135,7 +135,7 @@ export class CategoriesService {
   ): Promise<NoteCategory> {
     const category = await this.findOne(categoryId, userId);
 
-    // check duplicate name if rename
+    // check trùng tên nếu đổi tên
     if (updateCategoryDto.name && updateCategoryDto.name !== category.name) {
       const existing = await this.findByName(updateCategoryDto.name, userId);
       if (existing) {
@@ -155,12 +155,12 @@ export class CategoriesService {
   async remove(categoryId: string, userId: string): Promise<void> {
     const category = await this.findOne(categoryId, userId);
 
-    // not allow delete default categories
+    // không cho phép xóa category mặc định
     if (category.isDefault) {
       throw new BadRequestException('Cannot delete default categories');
     }
 
-    // check if any notes are currently in use
+    // check nếu còn note nào đang dùng category này, nếu có thì không cho xóa
     const noteCount = await this.noteRepository
       .createQueryBuilder('note')
       .where('note.categoryId = :categoryId', { categoryId })
