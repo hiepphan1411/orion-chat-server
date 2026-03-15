@@ -18,10 +18,18 @@ import { Workspace } from './modules/workspace/entities/workspace.entity';
 import { TaskList } from './modules/task-list/entities/task-list.entity';
 import { TaskBoard } from './modules/task-board/entities/task-board.entity';
 import { Task } from './modules/task/entities/task.entity';
+import { TaskAssignee } from './modules/task/entities/task-assignee.entity';
 import { User } from './modules/users/entities/user.entity';
 import { Admin } from './modules/admin/entities/admin.entity';
 import { Report } from './modules/reports/entities/reports.entity';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { BoardColumn } from './modules/board-column/entities/board-column.entity';
+import { Label } from './modules/label/entities/label.entity';
+
+import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { WorkspaceMemberModule } from './modules/workspace-member/workspace-member.module';
+import { TaskBoardModule } from './modules/task-board/task-board.module';
+import { BoardColumnModule } from './modules/board-column/board-column.module';
+import { LabelModule } from './modules/label/label.module';
 
 @Module({
   imports: [
@@ -30,7 +38,6 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
       isGlobal: true,
     }),
 
-    // PostgreSQL
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: 'localhost',
@@ -41,10 +48,13 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
       entities: [
         User,
         Task,
+        TaskAssignee,
         TaskBoard,
         TaskList,
         Workspace,
         WorkspaceMember,
+        BoardColumn,
+        Label,
         Report,
         Admin,
         Conversation,
@@ -66,6 +76,11 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
     CallModule,
     AIChatSessionModule,
     AIMessageModule,
+    WorkspaceModule,
+    WorkspaceMemberModule,
+    TaskBoardModule,
+    BoardColumnModule,
+    LabelModule,
   ],
 })
 export class AppModule {}

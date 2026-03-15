@@ -1,11 +1,22 @@
 /* eslint-disable */
 import { Priority } from 'src/common/enums/priority.enum';
 import { TaskStatus } from 'src/common/enums/task-status.enum';
-import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
+import { BoardColumn } from 'src/modules/board-column/entities/board-column.entity';
+import { Label } from 'src/modules/label/entities/label.entity';
 import { TaskBoard } from 'src/modules/task-board/entities/task-board.entity';
+import { TaskAssignee } from 'src/modules/task/entities/task-assignee.entity';
 import { User } from 'src/modules/users/entities/user.entity';
-import { Workspace } from 'src/modules/workspace/entities/workspace.entity';
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinTable,
+  ManyToMany,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity()
 export class Task {
@@ -15,7 +26,7 @@ export class Task {
   @Column()
   title: string;
 
-  @Column()
+  @Column({ type: 'text', nullable: true })
   description: string;
 
   @Column({
@@ -30,15 +41,40 @@ export class Task {
   })
   status: TaskStatus;
 
-  @Column()
-  dueDate: Date;
+  @Column({ type: 'int', default: 0 })
+  order: number;
 
-  @Column()
-  startDate: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  startDate: Date | null;
 
-  @Column()
-  completedAt: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  dueDate: Date | null;
 
-  @ManyToOne(() => TaskBoard)
+  @Column({ type: 'timestamp', nullable: true })
+  completedAt: Date | null;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+
+  @ManyToOne(() => TaskBoard, { onDelete: 'CASCADE' })
   board: TaskBoard;
+
+  @ManyToOne(() => BoardColumn, (col) => col.tasks, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  column: BoardColumn | null;
+
+  @ManyToOne(() => User, { eager: true })
+  createdBy: User;
+
+  @OneToMany(() => TaskAssignee, (ta) => ta.task, { cascade: true })
+  assignees: TaskAssignee[];
+
+  @ManyToMany(() => Label)
+  @JoinTable({ name: 'task_labels' })
+  labels: Label[];
 }
