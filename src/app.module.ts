@@ -9,10 +9,13 @@ import { Workspace } from './modules/workspace/entities/workspace.entity';
 import { TaskList } from './modules/task-list/entities/task-list.entity';
 import { TaskBoard } from './modules/task-board/entities/task-board.entity';
 import { Task } from './modules/task/entities/task.entity';
+import { TaskAssignee } from './modules/task/entities/task-assignee.entity';
 import { User } from './modules/users/entities/user.entity';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
 import { Admin } from './modules/admin/entities/admin.entity';
 import { Report } from './modules/reports/entities/reports.entity';
+import { BoardColumn } from './modules/board-column/entities/board-column.entity';
+import { Label } from './modules/label/entities/label.entity';
 
 import { MessageModule } from './modules/message/message.module';
 import { CallModule } from './modules/call/call.module';
@@ -20,6 +23,13 @@ import { AIChatSessionModule } from './modules/ai-chat-sesstion/ai-chat-sesstion
 import { AIMessageModule } from './modules/ai-message/ai-message.module';
 import { Conversation } from './modules/conversation/entities/conversation.entity';
 import { NotificationModule } from './modules/notifications/notification.module';
+
+// bổ sung - modules cho Work Hub
+import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { WorkspaceMemberModule } from './modules/workspace-member/workspace-member.module';
+import { TaskBoardModule } from './modules/task-board/task-board.module';
+import { BoardColumnModule } from './modules/board-column/board-column.module';
+import { LabelModule } from './modules/label/label.module';
 
 @Module({
   imports: [
@@ -34,10 +44,13 @@ import { NotificationModule } from './modules/notifications/notification.module'
         User,
         File,
         Task,
+        TaskAssignee, // bổ sung
         TaskBoard,
         TaskList,
         Workspace,
         WorkspaceMember,
+        BoardColumn, // bổ sung
+        Label, // bổ sung
         Report,
         Admin,
         Conversation,
@@ -54,6 +67,12 @@ import { NotificationModule } from './modules/notifications/notification.module'
     CallModule,
     AIChatSessionModule,
     AIMessageModule,
+    // bổ sung - Work Hub modules
+    WorkspaceModule,
+    WorkspaceMemberModule,
+    TaskBoardModule,
+    BoardColumnModule,
+    LabelModule,
   ],
 })
 export class AppModule {}

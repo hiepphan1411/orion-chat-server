@@ -1,17 +1,26 @@
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
 import { User } from 'src/modules/users/entities/user.entity';
 import { Workspace } from 'src/modules/workspace/entities/workspace.entity';
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 @Entity()
 export class WorkspaceMember {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Workspace)
+  // bổ sung - thêm inverse relation để workspace.members hoạt động
+  @ManyToOne(() => Workspace, (workspace) => workspace.members, {
+    onDelete: 'CASCADE',
+  })
   workspace: Workspace;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { eager: true })
   user: User;
 
   @Column({
@@ -20,6 +29,6 @@ export class WorkspaceMember {
   })
   role: WorkspaceRole;
 
-  @Column()
+  @CreateDateColumn()
   joinedAt: Date;
 }
