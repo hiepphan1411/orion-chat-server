@@ -98,5 +98,8 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
     SubTaskModule,
     CommentModule,
     ActivityLogModule,
+    AttachmentModule,
     NotesModule,
-],})
+  ],
+})
+export class AppModule {}
