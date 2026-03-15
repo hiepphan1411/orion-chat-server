@@ -30,6 +30,7 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
+import { Conversation } from './modules/conversation/entities/conversation.entity';
 
 @Module({
   imports: [
