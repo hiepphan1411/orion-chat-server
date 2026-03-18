@@ -34,6 +34,11 @@ import { Attachment } from './modules/attachment/entities/attachment.entity';
 import { ActivityLog } from './modules/activity-log/entities/activity-log.entity';
 import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
+import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
+import { Friendship } from './modules/friendship/entities/friendship.entity';
+import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupMember } from './modules/group-member/entities/group-member.entity';
+import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { WorkspaceMemberModule } from './modules/workspace-member/workspace-member.module';
@@ -42,6 +47,9 @@ import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
 import { Conversation } from './modules/conversation/entities/conversation.entity';
 import { CommonModule } from './common/common.module';
+import { FriendRequestModule } from './modules/friend-request/friend-request.module';
+import { GroupInviteModule } from './modules/group-invite/group-invite.module';
+import { FriendsModule } from './modules/friends/friends.module';
 
 @Module({
   imports: [
@@ -76,6 +84,11 @@ import { CommonModule } from './common/common.module';
         ActivityLog,
         PersonalNote,
         NoteCategory,
+        FriendRequest,
+        Friendship,
+        GroupConversation,
+        GroupMember,
+        GroupInvite,
       ],
       autoLoadEntities: true,
       synchronize: true,
@@ -106,6 +119,9 @@ import { CommonModule } from './common/common.module';
     ActivityLogModule,
     AttachmentModule,
     NotesModule,
+    FriendRequestModule,
+    GroupInviteModule,
+    FriendsModule,
   ],
 })
 export class AppModule {}
