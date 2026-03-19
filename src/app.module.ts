@@ -50,6 +50,7 @@ import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
+import { PresenceModule } from './modules/presence/presence.module';
 
 @Module({
   imports: [
@@ -122,6 +123,7 @@ import { FriendsModule } from './modules/friends/friends.module';
     FriendRequestModule,
     GroupInviteModule,
     FriendsModule,
+    PresenceModule,
   ],
 })
 export class AppModule {}
