@@ -98,7 +98,8 @@ export class AIChatSessionController {
   async updateSession(
     @Param('id') id: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: Partial<{ aiModel: string; systemPrompt: string; title: string }>,
+    @Body()
+    body: Partial<{ aiModel: string; systemPrompt: string; title: string }>,
   ) {
     return this.sessionService.updateSession(id, user.userId, body);
   }

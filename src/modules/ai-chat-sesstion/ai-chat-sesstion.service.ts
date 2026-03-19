@@ -13,6 +13,7 @@ import {
 } from './ai-chat-sesstion.schema';
 import { AIMessageService } from '../ai-message/ai-message.service';
 import { AIMessageRole } from 'src/common/enums/ai-message-role.enum';
+import { AIRagService } from '../ai-rag/ai-rag.service';
 import axios from 'axios';
 
 interface GeminiInlineAttachment {
@@ -43,6 +44,7 @@ export class AIChatSessionService {
     @InjectModel(AIChatSession.name)
     private sessionModel: Model<AIChatSessionDocument>,
     private readonly messageService: AIMessageService,
+    private readonly aiRagService: AIRagService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -147,12 +149,29 @@ export class AIChatSessionService {
       session.systemPrompt ||
       'You are a premium AI assistant. Be concise, practical, and reliable.';
 
+    const ragChunks = await this.aiRagService.retrieveRelevantChunks(
+      userId,
+      trimmed,
+      4,
+    );
+
+    const ragContext = ragChunks
+      .map(
+        (chunk, index) =>
+          `[${index + 1}] ${chunk.title} (chunk ${chunk.chunkIndex}, score ${chunk.score.toFixed(3)}): ${chunk.content}`,
+      )
+      .join('\n\n');
+
+    const effectiveSystemPrompt = ragContext
+      ? `${systemPrompt}\n\nUse the CONTEXT below as your primary factual source. If the answer is not in context, say you are not sure.\n\nCONTEXT:\n${ragContext}`
+      : systemPrompt;
+
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     try {
       const response = await axios.post<GeminiResponse>(endpoint, {
         systemInstruction: {
-          parts: [{ text: systemPrompt }],
+          parts: [{ text: effectiveSystemPrompt }],
         },
         contents,
         generationConfig: {

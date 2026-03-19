@@ -10,6 +10,7 @@ import { MessageModule } from './modules/message/message.module';
 import { CallModule } from './modules/call/call.module';
 import { AIChatSessionModule } from './modules/ai-chat-sesstion/ai-chat-sesstion.module';
 import { AIMessageModule } from './modules/ai-message/ai-message.module';
+import { AIRagModule } from './modules/ai-rag/ai-rag.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { SubTaskModule } from './modules/sub-task/sub-task.module';
 import { CommentModule } from './modules/comment/comment.module';
@@ -110,6 +111,7 @@ import { PresenceModule } from './modules/presence/presence.module';
     CallModule,
     AIChatSessionModule,
     AIMessageModule,
+    AIRagModule,
     WorkspaceModule,
     WorkspaceMemberModule,
     TaskBoardModule,
