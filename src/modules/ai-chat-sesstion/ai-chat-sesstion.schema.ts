@@ -5,11 +5,14 @@ export type AIChatSessionDocument = AIChatSession & Document;
 
 @Schema({ timestamps: true })
 export class AIChatSession {
-  @Prop({ required: true })
-  sessionId: string;
+  @Prop()
+  sessionId?: string;
 
   @Prop({ required: true })
   userId: string; // id từ PostgreSQL
+
+  @Prop({ default: 'New Conversation' })
+  title: string;
 
   @Prop({ required: true })
   aiModel: string;
