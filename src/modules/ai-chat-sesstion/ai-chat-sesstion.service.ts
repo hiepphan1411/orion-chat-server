@@ -36,7 +36,7 @@ interface GeminiResponse {
 
 type GeminiPart =
   | { text: string }
-  | { inline_data: { mime_type: string; data: string } };
+  | { inlineData: { mimeType: string; data: string } };
 
 @Injectable()
 export class AIChatSessionService {
@@ -106,6 +106,9 @@ export class AIChatSessionService {
     attachment?: GeminiInlineAttachment,
   ): Promise<{ assistantMessage: string; tokenUsed?: number }> {
     const trimmed = message.trim();
+    const isAudioAttachment = attachment?.mimeType.startsWith('audio/');
+    const isVoicePlaceholder =
+      trimmed.toLowerCase() === 'voice message' || trimmed.length === 0;
     if (!trimmed && !attachment) {
       throw new BadRequestException('Message cannot be empty');
     }
@@ -128,9 +131,15 @@ export class AIChatSessionService {
     if (attachment) {
       const lastContent = contents[contents.length - 1];
       if (lastContent) {
+        if (isAudioAttachment && isVoicePlaceholder) {
+          lastContent.parts[0] = {
+            text: 'Analyze the attached audio, infer the user intent, and answer directly in Vietnamese. Do not repeat or quote the transcript unless the user explicitly asks for transcription.',
+          };
+        }
+
         lastContent.parts.push({
-          inline_data: {
-            mime_type: attachment.mimeType,
+          inlineData: {
+            mimeType: attachment.mimeType,
             data: attachment.data,
           },
         });
@@ -149,9 +158,11 @@ export class AIChatSessionService {
       session.systemPrompt ||
       'You are a premium AI assistant. Be concise, practical, and reliable.';
 
+    const retrievalQuery =
+      isAudioAttachment && isVoicePlaceholder ? '' : trimmed;
     const ragChunks = await this.aiRagService.retrieveRelevantChunks(
       userId,
-      trimmed,
+      retrievalQuery,
       4,
     );
 
