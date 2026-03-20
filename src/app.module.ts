@@ -40,6 +40,8 @@ import { Friendship } from './modules/friendship/entities/friendship.entity';
 import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
+import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
+import { CalendarEventParticipant } from './modules/calendar-event/entities/calendar-event-participant.entity';
 
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { WorkspaceMemberModule } from './modules/workspace-member/workspace-member.module';
@@ -52,6 +54,7 @@ import { FriendRequestModule } from './modules/friend-request/friend-request.mod
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
+import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
 
 @Module({
   imports: [
@@ -91,6 +94,8 @@ import { PresenceModule } from './modules/presence/presence.module';
         GroupConversation,
         GroupMember,
         GroupInvite,
+        CalendarEvent,
+        CalendarEventParticipant,
       ],
       autoLoadEntities: true,
       synchronize: true,
@@ -126,6 +131,7 @@ import { PresenceModule } from './modules/presence/presence.module';
     GroupInviteModule,
     FriendsModule,
     PresenceModule,
+    CalendarEventModule,
   ],
 })
 export class AppModule {}
