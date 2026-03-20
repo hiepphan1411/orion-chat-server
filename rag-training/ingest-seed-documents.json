@@ -1,0 +1,59 @@
+{
+  "replaceAll": false,
+  "chunking": {
+    "chunkSize": 900,
+    "overlap": 120
+  },
+  "documents": [
+    {
+      "title": "Orion Account Security Policy",
+      "tags": ["security", "auth", "policy"],
+      "content": "Users can reset passwords through verified email. After 5 failed login attempts, account lockout is activated for security. 2FA is optional but recommended. Recovery without backup email requires identity verification by support with pre-defined checklist."
+    },
+    {
+      "title": "Workspace Roles and Permissions",
+      "tags": ["workspace", "roles", "permission"],
+      "content": "Workspace Owner can transfer ownership, manage billing, and assign Admin role. Admin manages members, boards, and settings. Member can create and update tasks, comment, and upload attachments. Guest has restricted visibility and cannot manage workspace settings."
+    },
+    {
+      "title": "Task Board Workflow",
+      "tags": ["task", "board", "kanban"],
+      "content": "A task board is created inside a workspace. Typical columns are Backlog, In Progress, Review, Done. Tasks support labels, priorities, assignees, due dates, subtasks, and attachments. Overdue tasks are highlighted and can trigger reminders."
+    },
+    {
+      "title": "Task Notification Guide",
+      "tags": ["notification", "task", "reminder"],
+      "content": "Users receive in-app and optional email notifications for assignment, due date updates, comments, and mentions. Reminder windows can be configured per user. Mention-only mode and project mute are available for focus workflows."
+    },
+    {
+      "title": "Personal Notes Guide",
+      "tags": ["notes", "personal", "privacy"],
+      "content": "Personal notes can be categorized, tagged, pinned, and searched by keyword. Users can lock private notes and selectively share notes with collaborators. Deleted notes can be restored from history within retention period."
+    },
+    {
+      "title": "Chat and Group Conversation",
+      "tags": ["chat", "group", "communication"],
+      "content": "Users can open direct messages or create group conversations. Group admins can invite members and moderate content. Message editing and deletion are available within policy limits. Spam and abuse can be reported."
+    },
+    {
+      "title": "Voice and Call Features",
+      "tags": ["voice", "call", "chat"],
+      "content": "Orion supports voice attachments in chat and one-tap call initiation from conversation view. Missed calls appear in notification history. Presence indicators show online status for active teammates."
+    },
+    {
+      "title": "AI Assistant Grounded Response Policy",
+      "tags": ["ai", "rag", "policy"],
+      "content": "AI assistant must prioritize retrieved context as factual source. If context is insufficient, response should clearly state uncertainty and ask clarifying question. Hallucination-prone answers should be avoided by requiring citation style references."
+    },
+    {
+      "title": "RAG Benchmark and Evaluation",
+      "tags": ["rag", "benchmark", "evaluation"],
+      "content": "Retrieval quality is tracked by hit rate and MRR. Answer quality is tracked by correctness, groundedness, and helpfulness. Weekly evaluation should include no-answer handling and source citation compliance."
+    },
+    {
+      "title": "RAG Improvement Loop",
+      "tags": ["rag", "feedback", "training"],
+      "content": "Collect user feedback labels: Correct, Incorrect, Missing, Unsafe. Convert failed interactions into benchmark samples. Re-ingest updated docs weekly, then rerun benchmark, tune chunk parameters, and run prompt A/B tests before rollout."
+    }
+  ]
+}

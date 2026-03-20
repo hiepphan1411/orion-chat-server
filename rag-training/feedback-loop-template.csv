@@ -1,0 +1,3 @@
+timestamp,userId,sessionId,question,assistantAnswer,label,issueType,missingTopic,expectedKeywords,retrievedDocIds,retrievalHit,responseGroundedness,responseHelpfulness,notes,nextAction
+2026-03-20T10:00:00Z,user_001,session_001,How do I reset password?,Use account settings...,Incorrect,policy_mismatch,password reset,"password|reset|verification",doc_security,false,0.20,0.40,Answer ignored lockout policy,add benchmark and update security doc
+2026-03-20T10:05:00Z,user_002,session_002,How to invite member?,Go to workspace settings...,Correct,none,,"invite|member|workspace",doc_roles,true,0.88,0.90,Good answer,keep

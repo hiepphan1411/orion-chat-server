@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OrionRagFeedbackEvent",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "userId",
+    "sessionId",
+    "question",
+    "assistantAnswer",
+    "label",
+    "issueType"
+  ],
+  "properties": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "userId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 3 },
+    "assistantAnswer": { "type": "string", "minLength": 1 },
+    "label": {
+      "type": "string",
+      "enum": ["Correct", "Incorrect", "Missing", "Unsafe"]
+    },
+    "issueType": {
+      "type": "string",
+      "enum": [
+        "none",
+        "retrieval_miss",
+        "policy_mismatch",
+        "hallucination",
+        "format_issue",
+        "tone_issue",
+        "safety_issue"
+      ]
+    },
+    "missingTopic": { "type": "string" },
+    "expectedKeywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "retrievedDocIds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "retrievalHit": { "type": "boolean" },
+    "responseGroundedness": { "type": "number", "minimum": 0, "maximum": 1 },
+    "responseHelpfulness": { "type": "number", "minimum": 0, "maximum": 1 },
+    "notes": { "type": "string" },
+    "nextAction": {
+      "type": "string",
+      "enum": [
+        "keep",
+        "add_benchmark",
+        "update_docs",
+        "retune_chunk",
+        "retune_prompt",
+        "ab_test",
+        "manual_review"
+      ]
+    }
+  },
+  "additionalProperties": false
+}
