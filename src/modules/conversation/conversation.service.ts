@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { InjectModel } from '@nestjs/mongoose'; // Thêm Mongoose
 import { Model, PipelineStage } from 'mongoose';
 import { Repository } from 'typeorm';
+import { MessageType } from 'src/common/enums/message-type.enum';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
 
@@ -37,6 +38,14 @@ type ConversationMessagesResult = {
   conversationId: string;
   items: MessageDetail[];
   nextCursor: string | null;
+};
+
+type CreateConversationMessagePayload = {
+  senderBy: string;
+  content: string;
+  messageType?: string;
+  replyToMessageId?: string;
+  clientMessageId?: string;
 };
 
 @Injectable()
@@ -115,6 +124,41 @@ export class ConversationService {
       items,
       nextCursor,
     };
+  }
+
+  async createMessageInConversation(
+    conversationId: string,
+    actorUserId: string,
+    payload: CreateConversationMessagePayload,
+  ): Promise<MessageDocument> {
+    await this.requireMembership(conversationId, actorUserId);
+
+    if (payload.senderBy !== actorUserId) {
+      throw new ForbiddenException('senderBy must match userId');
+    }
+
+    const normalizedType = this.normalizeMessageType(payload.messageType);
+
+    return this.messageModel.create({
+      conversationId,
+      senderBy: payload.senderBy,
+      content: payload.content,
+      messageType: normalizedType,
+      replyToMessageId: payload.replyToMessageId,
+      clientMessageId: payload.clientMessageId,
+      messageStatus: 'SENT',
+    });
+  }
+
+  private normalizeMessageType(messageType?: string): MessageType {
+    const normalized = String(messageType || MessageType.TEXT).toUpperCase();
+
+    const values = Object.values(MessageType) as string[];
+    if (values.includes(normalized)) {
+      return normalized as MessageType;
+    }
+
+    return MessageType.TEXT;
   }
 
   private async requireMembership(conversationId: string, userId: string) {

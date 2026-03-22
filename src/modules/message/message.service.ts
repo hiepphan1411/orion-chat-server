@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
+import { MessageType } from 'src/common/enums/message-type.enum';
 import { Message, MessageDocument } from './message.schema';
 
 @Injectable()
@@ -22,15 +23,40 @@ export class MessageService {
     replyToMessageId?: string;
     clientMessageId?: string;
   }) {
+    const normalizedType = this.normalizeMessageType(payload.messageType);
+
     return this.messageModel.create({
       conversationId: payload.conversationId,
       senderBy: payload.senderBy,
       content: payload.content,
-      messageType: payload.messageType || 'text',
+      messageType: normalizedType,
       replyToMessageId: payload.replyToMessageId,
       clientMessageId: payload.clientMessageId,
-      messageStatus: 'sent',
+      messageStatus: 'SENT',
     });
+  }
+
+  private normalizeMessageType(messageType?: string): MessageType {
+    const normalized = String(messageType || MessageType.TEXT).toUpperCase();
+
+    switch (normalized) {
+      case MessageType.TEXT:
+        return MessageType.TEXT;
+      case MessageType.IMAGE:
+        return MessageType.IMAGE;
+      case MessageType.FILE:
+        return MessageType.FILE;
+      case MessageType.VIDEO:
+        return MessageType.VIDEO;
+      case MessageType.AUDIO:
+        return MessageType.AUDIO;
+      case MessageType.VOICE_MESSAGE:
+        return MessageType.VOICE_MESSAGE;
+      case MessageType.STICKER:
+        return MessageType.STICKER;
+      default:
+        return MessageType.TEXT;
+    }
   }
 
   async getByConversation(conversationId: string, cursor?: string, limit = 30) {

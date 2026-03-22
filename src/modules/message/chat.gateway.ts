@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
+import { MessageType } from 'src/common/enums/message-type.enum';
 import { Message, MessageDocument } from './message.schema';
 
 const onlineUsers = new Map<string, string>();
@@ -204,9 +205,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId,
       senderBy: senderId,
       content,
-      messageType: type,
+      messageType: this.normalizeMessageType(type),
       replyToMessageId: replyToMessageId,
-      messageStatus: 'sent',
+      messageStatus: 'SENT',
       clientMessageId,
     });
 
@@ -323,5 +324,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
 
     client.emit('chat:ack', ack);
+  }
+
+  private normalizeMessageType(messageType: string): MessageType {
+    const normalized = String(messageType || MessageType.TEXT).toUpperCase();
+
+    switch (normalized) {
+      case MessageType.TEXT:
+        return MessageType.TEXT;
+      case MessageType.IMAGE:
+        return MessageType.IMAGE;
+      case MessageType.FILE:
+        return MessageType.FILE;
+      case MessageType.VIDEO:
+        return MessageType.VIDEO;
+      case MessageType.AUDIO:
+        return MessageType.AUDIO;
+      case MessageType.VOICE_MESSAGE:
+        return MessageType.VOICE_MESSAGE;
+      case MessageType.STICKER:
+        return MessageType.STICKER;
+      default:
+        return MessageType.TEXT;
+    }
   }
 }

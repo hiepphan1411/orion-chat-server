@@ -1,6 +1,8 @@
 import {
   Controller,
   Get,
+  Post,
+  Body,
   Query,
   BadRequestException,
   Param,
@@ -38,6 +40,42 @@ export class ConversationController {
       userId,
       cursor,
       limit ? Number(limit) : 30,
+    );
+  }
+
+  @Post(':conversationId/messages')
+  createConversationMessage(
+    @Param('conversationId') conversationId: string,
+    @Body()
+    body: {
+      userId?: string;
+      senderBy?: string;
+      content?: string;
+      messageType?: string;
+      replyToMessageId?: string;
+      clientMessageId?: string;
+    },
+  ) {
+    if (!body?.senderBy) {
+      throw new BadRequestException('senderBy is required');
+    }
+
+    if (!body?.content) {
+      throw new BadRequestException('content is required');
+    }
+
+    const actorUserId = body.userId || body.senderBy;
+
+    return this.conversationService.createMessageInConversation(
+      conversationId,
+      actorUserId,
+      {
+        senderBy: body.senderBy,
+        content: body.content,
+        messageType: body.messageType,
+        replyToMessageId: body.replyToMessageId,
+        clientMessageId: body.clientMessageId,
+      },
     );
   }
 }
