@@ -1,4 +1,4 @@
-import { GroupConversation } from 'src/modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from 'src/modules/conversation/entities/group-conversation.entity';
 import { User } from 'src/modules/users/entities/user.entity';
 import {
   Column,

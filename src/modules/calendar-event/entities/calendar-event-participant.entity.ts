@@ -1,4 +1,4 @@
-import { GroupConversation } from 'src/modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from '../../conversation/entities/group-conversation.entity';
 import { User } from 'src/modules/users/entities/user.entity';
 import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { CalendarEvent } from './calendar-event.entity';

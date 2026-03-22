@@ -44,7 +44,7 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from 'src/modules/conversation/entities/group-conversation.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
