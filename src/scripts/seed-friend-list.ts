@@ -1,5 +1,5 @@
 import { DataSource, In, Repository } from 'typeorm';
-import { Conversation } from 'src/modules/conversation/entities/conversation.entity';
+import { Conversation } from 'src/modules/conversation/entities/conversation.schema';
 import { Admin } from 'src/modules/admin/entities/admin.entity';
 import { File } from 'src/modules/file/entities/file.entity';
 import {

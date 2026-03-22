@@ -72,6 +72,7 @@ import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
 
 @Module({
   imports: [
