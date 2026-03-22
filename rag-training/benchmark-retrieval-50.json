@@ -1,0 +1,214 @@
+{
+  "topK": 5,
+  "retrievalConfig": {
+    "candidateLimit": 1200,
+    "minScore": -1,
+    "deduplicateByDocument": false
+  },
+  "samples": [
+    {
+      "query": "How do I reset my Orion account password?",
+      "expectedKeywords": ["password", "reset", "email", "verification"]
+    },
+    {
+      "query": "What should I do if login fails after 5 attempts?",
+      "expectedKeywords": ["lock", "attempt", "security", "support"]
+    },
+    {
+      "query": "How to enable 2FA in Orion?",
+      "expectedKeywords": ["2fa", "authenticator", "backup code"]
+    },
+    {
+      "query": "Can I recover account without backup email?",
+      "expectedKeywords": ["recover", "identity", "support", "verification"]
+    },
+    {
+      "query": "How to invite a new member to workspace?",
+      "expectedKeywords": ["invite", "workspace", "member", "email"]
+    },
+    {
+      "query": "How do I change workspace owner?",
+      "expectedKeywords": ["owner", "transfer", "permission"]
+    },
+    {
+      "query": "What permissions does admin have?",
+      "expectedKeywords": ["admin", "permission", "workspace", "manage"]
+    },
+    {
+      "query": "What can a normal member do in task board?",
+      "expectedKeywords": ["member", "task", "update", "comment"]
+    },
+    {
+      "query": "How to remove a user from workspace?",
+      "expectedKeywords": ["remove", "member", "workspace"]
+    },
+    {
+      "query": "Can guest users create tasks?",
+      "expectedKeywords": ["guest", "create", "task", "permission"]
+    },
+
+    {
+      "query": "How to create a task board in Orion?",
+      "expectedKeywords": ["task board", "create", "workspace"]
+    },
+    {
+      "query": "How to add column in Kanban board?",
+      "expectedKeywords": ["column", "kanban", "board"]
+    },
+    {
+      "query": "How to assign task to multiple users?",
+      "expectedKeywords": ["assign", "task", "assignee"]
+    },
+    {
+      "query": "How to set due date and reminder for a task?",
+      "expectedKeywords": ["due date", "reminder", "notification"]
+    },
+    {
+      "query": "How to mark subtask completed?",
+      "expectedKeywords": ["subtask", "complete", "progress"]
+    },
+    {
+      "query": "Can I add file attachments to tasks?",
+      "expectedKeywords": ["attachment", "file", "task"]
+    },
+    {
+      "query": "How to archive finished tasks?",
+      "expectedKeywords": ["archive", "task", "board"]
+    },
+    {
+      "query": "How to restore archived tasks?",
+      "expectedKeywords": ["restore", "archive", "task"]
+    },
+    {
+      "query": "How to filter tasks by label?",
+      "expectedKeywords": ["filter", "label", "task"]
+    },
+    {
+      "query": "How to view overdue tasks quickly?",
+      "expectedKeywords": ["overdue", "filter", "due date"]
+    },
+
+    {
+      "query": "How to create personal note?",
+      "expectedKeywords": ["personal note", "create", "save"]
+    },
+    {
+      "query": "How to organize notes by category?",
+      "expectedKeywords": ["note", "category", "organize"]
+    },
+    {
+      "query": "Can I pin important notes?",
+      "expectedKeywords": ["pin", "note", "important"]
+    },
+    {
+      "query": "How to share note with team members?",
+      "expectedKeywords": ["share", "note", "permission"]
+    },
+    {
+      "query": "How to search notes by keyword?",
+      "expectedKeywords": ["search", "note", "keyword"]
+    },
+    {
+      "query": "How to recover deleted note?",
+      "expectedKeywords": ["recover", "deleted", "note"]
+    },
+    {
+      "query": "Is there note version history?",
+      "expectedKeywords": ["version", "history", "note"]
+    },
+    {
+      "query": "How to convert note into task?",
+      "expectedKeywords": ["convert", "note", "task"]
+    },
+    {
+      "query": "How to export notes to pdf?",
+      "expectedKeywords": ["export", "pdf", "note"]
+    },
+    {
+      "query": "How to lock private note?",
+      "expectedKeywords": ["lock", "private", "note", "security"]
+    },
+
+    {
+      "query": "How does Orion send task notifications?",
+      "expectedKeywords": ["notification", "task", "in-app", "email"]
+    },
+    {
+      "query": "How to mute notification from one project?",
+      "expectedKeywords": ["mute", "notification", "project"]
+    },
+    {
+      "query": "How to configure reminder time before deadline?",
+      "expectedKeywords": ["reminder", "deadline", "setting"]
+    },
+    {
+      "query": "How to enable push notification on mobile?",
+      "expectedKeywords": ["push", "mobile", "notification"]
+    },
+    {
+      "query": "How to disable weekend notifications?",
+      "expectedKeywords": ["disable", "weekend", "notification"]
+    },
+    {
+      "query": "How to mark all notifications as read?",
+      "expectedKeywords": ["mark all", "read", "notification"]
+    },
+    {
+      "query": "Can I receive digest notification every morning?",
+      "expectedKeywords": ["digest", "daily", "notification"]
+    },
+    {
+      "query": "How to track missed calls in Orion chat?",
+      "expectedKeywords": ["missed call", "chat", "notification"]
+    },
+    {
+      "query": "How to configure mention-only notifications?",
+      "expectedKeywords": ["mention", "notification", "setting"]
+    },
+    {
+      "query": "Where to view notification history?",
+      "expectedKeywords": ["history", "notification", "activity"]
+    },
+
+    {
+      "query": "How to start direct message with a teammate?",
+      "expectedKeywords": ["direct message", "chat", "teammate"]
+    },
+    {
+      "query": "How to create group conversation?",
+      "expectedKeywords": ["group", "conversation", "create"]
+    },
+    {
+      "query": "How to invite people to existing group chat?",
+      "expectedKeywords": ["group", "invite", "member"]
+    },
+    {
+      "query": "How to leave a group conversation?",
+      "expectedKeywords": ["leave", "group", "conversation"]
+    },
+    {
+      "query": "Can I edit or delete sent messages?",
+      "expectedKeywords": ["edit", "delete", "message"]
+    },
+    {
+      "query": "How to attach files in chat?",
+      "expectedKeywords": ["attach", "file", "chat"]
+    },
+    {
+      "query": "How to start a voice call from chat?",
+      "expectedKeywords": ["voice call", "chat", "start"]
+    },
+    {
+      "query": "How to block spam user in chat?",
+      "expectedKeywords": ["block", "spam", "user"]
+    },
+    {
+      "query": "How to report abusive content?",
+      "expectedKeywords": ["report", "abuse", "moderation"]
+    },
+    {
+      "query": "How to check user online presence?",
+      "expectedKeywords": ["presence", "online", "status"]
+    }
+  ]
+}

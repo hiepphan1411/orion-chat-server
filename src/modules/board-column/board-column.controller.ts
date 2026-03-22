@@ -12,22 +12,6 @@ import { CreateBoardColumnDto } from './dto/create-board-column.dto';
 import { UpdateBoardColumnDto } from './dto/update-board-column.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
-/**
- * API Board Columns
- *
- * POST   /boards/:boardId/columns
- *   - Body: { name, status, color?, taskLimit? }
- *   - Tự động thêm vào cuối (order = số column hiện tại)
- *
- * PATCH  /boards/:boardId/columns/:columnId
- *   - Body: bất kỳ field (name, status, color, taskLimit)
- *
- * DELETE /boards/:boardId/columns/:columnId
- *   - Tasks trong column sẽ mất reference column (SET NULL)
- *
- * PATCH  /boards/:boardId/columns/reorder
- *   - Body: { columnIds: string[] } - mảng columnId theo thứ tự mong muốn
- */
 @Controller('boards/:boardId/columns')
 @UseGuards(JwtAuthGuard)
 export class BoardColumnController {

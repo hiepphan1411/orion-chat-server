@@ -385,10 +385,4 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // helper method: lấy người dùng online
-  @SubscribeMessage('users:get-online')
-  handleGetOnlineUsers(@ConnectedSocket() client: Socket) {
-    const onlineUserIds = Array.from(onlineUsers.keys());
-    client.emit('users:online-list', { users: onlineUserIds });
-  }
 }

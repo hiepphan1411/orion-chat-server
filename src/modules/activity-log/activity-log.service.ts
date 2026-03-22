@@ -43,4 +43,21 @@ export class ActivityLogService {
       order: { timestamp: 'DESC' },
     });
   }
+
+  /**
+   * Lấy tất cả activity logs trong workspace
+   */
+  async findByWorkspace(workspaceId: string) {
+    return this.activityLogRepo
+      .createQueryBuilder('al')
+      .innerJoin('al.task', 'task')
+      .innerJoin('task.board', 'board')
+      .innerJoin('board.workspace', 'ws')
+      .leftJoinAndSelect('al.user', 'user')
+      .leftJoinAndSelect('al.task', 'taskSelect')
+      .where('ws.workspaceId = :workspaceId', { workspaceId })
+      .orderBy('al.timestamp', 'DESC')
+      .take(100)
+      .getMany();
+  }
 }

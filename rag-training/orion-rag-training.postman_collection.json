@@ -1,0 +1,109 @@
+{
+  "info": {
+    "name": "Orion RAG Training Pipeline",
+    "_postman_id": "b5a0d53e-3be4-4263-93ba-2ac1a56b7f31",
+    "description": "Requests for ingest, benchmark, chunk tuning, prompt tuning, and A/B testing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Ingest Batch",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwtToken}}",
+            "type": "text"
+          },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"replaceAll\": true,\n  \"chunking\": {\n    \"chunkSize\": 900,\n    \"overlap\": 120\n  },\n  \"documents\": [\n    {\n      \"title\": \"Orion Account Security Policy\",\n      \"tags\": [\"security\", \"auth\"],\n      \"content\": \"Users can reset passwords through verified email. After 5 failed login attempts, account lockout is activated.\"\n    },\n    {\n      \"title\": \"Workspace Roles and Permissions\",\n      \"tags\": [\"workspace\", \"roles\"],\n      \"content\": \"Owner can transfer ownership. Admin manages members and settings. Member can create and update tasks.\"\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/ai-rag/pipeline/ingest-batch"
+      }
+    },
+    {
+      "name": "2. Retrieval Benchmark",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwtToken}}",
+            "type": "text"
+          },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"topK\": 5,\n  \"retrievalConfig\": {\n    \"candidateLimit\": 1200,\n    \"minScore\": -1,\n    \"deduplicateByDocument\": false\n  },\n  \"samples\": [\n    {\n      \"query\": \"How do I reset my Orion account password?\",\n      \"expectedKeywords\": [\"password\", \"reset\", \"verification\"]\n    },\n    {\n      \"query\": \"How to invite a new member to workspace?\",\n      \"expectedKeywords\": [\"invite\", \"workspace\", \"member\"]\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/ai-rag/pipeline/benchmark"
+      }
+    },
+    {
+      "name": "3. Tune Chunk",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwtToken}}",
+            "type": "text"
+          },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"configs\": [\n    { \"chunkSize\": 600, \"overlap\": 80 },\n    { \"chunkSize\": 900, \"overlap\": 120 },\n    { \"chunkSize\": 1200, \"overlap\": 150 }\n  ],\n  \"topK\": 5,\n  \"samples\": [\n    {\n      \"query\": \"How do I reset my Orion account password?\",\n      \"expectedKeywords\": [\"password\", \"reset\", \"verification\"]\n    },\n    {\n      \"query\": \"What permissions does admin have?\",\n      \"expectedKeywords\": [\"admin\", \"permission\"]\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/ai-rag/pipeline/tune-chunk"
+      }
+    },
+    {
+      "name": "4. Tune Prompt",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwtToken}}",
+            "type": "text"
+          },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"topK\": 5,\n  \"model\": \"gemini-2.5-flash\",\n  \"variants\": [\n    {\n      \"name\": \"strict-grounded\",\n      \"systemPrompt\": \"Use only retrieved context. If missing, say you are unsure and ask follow-up question.\"\n    },\n    {\n      \"name\": \"helpful-balanced\",\n      \"systemPrompt\": \"Be helpful and concise, but never invent facts outside retrieved context.\"\n    }\n  ],\n  \"samples\": [\n    {\n      \"query\": \"Write a step-by-step password reset guide for a normal Orion user.\",\n      \"expectedKeywords\": [\"email\", \"verification\", \"reset\"]\n    },\n    {\n      \"query\": \"Compare Admin vs Member permissions in concise bullets.\",\n      \"expectedKeywords\": [\"admin\", \"member\", \"permission\"]\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/ai-rag/pipeline/tune-prompt"
+      }
+    },
+    {
+      "name": "5. A/B Test Prompt",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwtToken}}",
+            "type": "text"
+          },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"topK\": 5,\n  \"model\": \"gemini-2.5-flash\",\n  \"variantA\": {\n    \"name\": \"strict-grounded\",\n    \"systemPrompt\": \"Use only retrieved context. If missing, say you are unsure.\"\n  },\n  \"variantB\": {\n    \"name\": \"helpful-balanced\",\n    \"systemPrompt\": \"Be helpful and concise. Never invent facts outside retrieved context.\"\n  },\n  \"samples\": [\n    {\n      \"query\": \"How to invite a new member to workspace?\",\n      \"expectedKeywords\": [\"invite\", \"member\", \"workspace\"]\n    },\n    {\n      \"query\": \"How to configure mention-only notifications?\",\n      \"expectedKeywords\": [\"mention\", \"notification\", \"setting\"]\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/ai-rag/pipeline/ab-test"
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwtToken", "value": "" }
+  ]
+}

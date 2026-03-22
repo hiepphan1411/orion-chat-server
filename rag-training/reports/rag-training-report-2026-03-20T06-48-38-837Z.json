@@ -1,0 +1,68 @@
+{
+  "startedAt": "2026-03-20T06:48:38.834Z",
+  "dryRun": true,
+  "baseUrl": "http://localhost:3000",
+  "model": "gemini-2.5-flash",
+  "steps": {
+    "ingestBatch": {
+      "dryRun": true,
+      "endpoint": "/ai-rag/pipeline/ingest-batch",
+      "payloadSummary": {
+        "keys": [
+          "replaceAll",
+          "chunking",
+          "documents"
+        ]
+      }
+    },
+    "retrievalBenchmark": {
+      "dryRun": true,
+      "endpoint": "/ai-rag/pipeline/benchmark",
+      "payloadSummary": {
+        "keys": [
+          "topK",
+          "retrievalConfig",
+          "samples"
+        ]
+      }
+    },
+    "tuneChunk": {
+      "dryRun": true,
+      "endpoint": "/ai-rag/pipeline/tune-chunk",
+      "payloadSummary": {
+        "keys": [
+          "configs",
+          "topK",
+          "retrievalConfig",
+          "samples"
+        ]
+      }
+    },
+    "tunePrompt": {
+      "dryRun": true,
+      "endpoint": "/ai-rag/pipeline/tune-prompt",
+      "payloadSummary": {
+        "keys": [
+          "topK",
+          "model",
+          "variants",
+          "samples"
+        ]
+      }
+    },
+    "abTest": {
+      "dryRun": true,
+      "endpoint": "/ai-rag/pipeline/ab-test",
+      "payloadSummary": {
+        "keys": [
+          "topK",
+          "model",
+          "variantA",
+          "variantB",
+          "samples"
+        ]
+      }
+    }
+  },
+  "endedAt": "2026-03-20T06:48:38.837Z"
+}

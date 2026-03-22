@@ -10,6 +10,7 @@ import { SubTask } from 'src/modules/sub-task/entities/sub-task.entity';
 import { Comment } from 'src/modules/comment/entities/comment.entity';
 import { Attachment } from 'src/modules/attachment/entities/attachment.entity';
 import { ActivityLog } from 'src/modules/activity-log/entities/activity-log.entity';
+import { Sprint } from '../../sprint/entities/sprint.entity';
 import {
   Column,
   CreateDateColumn,
@@ -93,4 +94,10 @@ export class Task {
 
   @OneToMany(() => ActivityLog, (al) => al.task)
   activityLogs: ActivityLog[];
+
+  @Column({ type: 'int', nullable: true })
+  storyPoints: number | null;
+
+  @ManyToOne(() => Sprint, { nullable: true, onDelete: 'SET NULL' })
+  sprint: Sprint | null;
 }

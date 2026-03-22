@@ -1,0 +1,215 @@
+{
+  "topK": 5,
+  "model": "gemini-2.5-flash",
+  "samples": [
+    {
+      "query": "Write a step-by-step password reset guide for a normal Orion user.",
+      "expectedKeywords": ["email", "verification", "reset", "password"]
+    },
+    {
+      "query": "Explain how account lockout works after failed logins.",
+      "expectedKeywords": ["attempt", "lock", "security"]
+    },
+    {
+      "query": "Give a short policy for 2FA activation and backup codes.",
+      "expectedKeywords": ["2fa", "backup", "code"]
+    },
+    {
+      "query": "How should support verify identity for account recovery?",
+      "expectedKeywords": ["identity", "verification", "support"]
+    },
+    {
+      "query": "What is the safe flow for changing a workspace owner?",
+      "expectedKeywords": ["owner", "transfer", "permission"]
+    },
+
+    {
+      "query": "Create onboarding steps to invite 5 new members to workspace.",
+      "expectedKeywords": ["invite", "member", "workspace"]
+    },
+    {
+      "query": "Compare Admin vs Member permissions in concise bullets.",
+      "expectedKeywords": ["admin", "member", "permission"]
+    },
+    {
+      "query": "How do I remove a member while preserving task history?",
+      "expectedKeywords": ["remove", "member", "history"]
+    },
+    {
+      "query": "When should guest access be used and what are limits?",
+      "expectedKeywords": ["guest", "limit", "permission"]
+    },
+    {
+      "query": "Show the approval process before granting admin role.",
+      "expectedKeywords": ["approval", "admin", "role"]
+    },
+
+    {
+      "query": "How to set up a Kanban board for a new sprint?",
+      "expectedKeywords": ["kanban", "board", "column"]
+    },
+    {
+      "query": "Give best practice for task labels and priorities.",
+      "expectedKeywords": ["label", "priority", "task"]
+    },
+    {
+      "query": "How to assign one task to multiple teammates properly?",
+      "expectedKeywords": ["assign", "task", "assignee"]
+    },
+    {
+      "query": "What reminders should we use for deadline-critical tasks?",
+      "expectedKeywords": ["reminder", "deadline", "notification"]
+    },
+    {
+      "query": "Describe the lifecycle: backlog to done in Orion tasks.",
+      "expectedKeywords": ["backlog", "progress", "done"]
+    },
+
+    {
+      "query": "How can we recover accidentally archived tasks?",
+      "expectedKeywords": ["archive", "restore", "task"]
+    },
+    {
+      "query": "Write instructions for creating and finishing subtasks.",
+      "expectedKeywords": ["subtask", "complete", "progress"]
+    },
+    {
+      "query": "How to use attachments in tasks without confusion?",
+      "expectedKeywords": ["attachment", "file", "task"]
+    },
+    {
+      "query": "How can PM quickly find all overdue tasks?",
+      "expectedKeywords": ["overdue", "filter", "due date"]
+    },
+    {
+      "query": "What metrics should we monitor on task completion?",
+      "expectedKeywords": ["completion", "progress", "report"]
+    },
+
+    {
+      "query": "How to create private personal notes for sensitive info?",
+      "expectedKeywords": ["private", "note", "lock"]
+    },
+    {
+      "query": "Explain note categories and tagging strategy.",
+      "expectedKeywords": ["note", "category", "tag"]
+    },
+    {
+      "query": "How to share notes with selected members only?",
+      "expectedKeywords": ["share", "permission", "note"]
+    },
+    {
+      "query": "How to recover deleted notes from history?",
+      "expectedKeywords": ["recover", "deleted", "history"]
+    },
+    {
+      "query": "Write policy for converting notes into executable tasks.",
+      "expectedKeywords": ["convert", "note", "task"]
+    },
+
+    {
+      "query": "How should users configure push notifications on mobile?",
+      "expectedKeywords": ["push", "mobile", "notification"]
+    },
+    {
+      "query": "What are the options for muting noisy projects?",
+      "expectedKeywords": ["mute", "project", "notification"]
+    },
+    {
+      "query": "How to set mention-only notifications for focus mode?",
+      "expectedKeywords": ["mention", "notification", "focus"]
+    },
+    {
+      "query": "How can users view notification history and audit events?",
+      "expectedKeywords": ["history", "notification", "activity"]
+    },
+    {
+      "query": "Describe daily digest notification usage.",
+      "expectedKeywords": ["digest", "daily", "notification"]
+    },
+
+    {
+      "query": "How to start direct chat and share a task link?",
+      "expectedKeywords": ["direct message", "chat", "task"]
+    },
+    {
+      "query": "Give steps to create and manage group conversations.",
+      "expectedKeywords": ["group", "conversation", "member"]
+    },
+    {
+      "query": "How to moderate abusive messages in group chat?",
+      "expectedKeywords": ["report", "abuse", "moderation"]
+    },
+    {
+      "query": "How to block a spam user and un-block later?",
+      "expectedKeywords": ["block", "spam", "user"]
+    },
+    {
+      "query": "How to track online presence in real time?",
+      "expectedKeywords": ["presence", "online", "status"]
+    },
+
+    {
+      "query": "How to attach image and voice message in AI chat?",
+      "expectedKeywords": ["attachment", "audio", "image"]
+    },
+    {
+      "query": "What should AI do if context does not contain an answer?",
+      "expectedKeywords": ["context", "unsure", "clarify"]
+    },
+    {
+      "query": "Define the response format with source citation for AI answers.",
+      "expectedKeywords": ["source", "citation", "context"]
+    },
+    {
+      "query": "How to prevent hallucination in Orion AI assistant?",
+      "expectedKeywords": ["hallucination", "context", "grounded"]
+    },
+    {
+      "query": "What is the fallback behavior when retrieval returns empty?",
+      "expectedKeywords": ["retrieval", "empty", "fallback"]
+    },
+
+    {
+      "query": "How to run RAG benchmark and interpret hit rate and MRR?",
+      "expectedKeywords": ["benchmark", "hit rate", "mrr"]
+    },
+    {
+      "query": "How to choose chunk size and overlap for Orion docs?",
+      "expectedKeywords": ["chunk", "overlap", "retrieval"]
+    },
+    {
+      "query": "Explain A/B testing flow for prompt variants.",
+      "expectedKeywords": ["a/b", "prompt", "variant"]
+    },
+    {
+      "query": "How often should we re-ingest new docs into RAG?",
+      "expectedKeywords": ["ingest", "schedule", "update"]
+    },
+    {
+      "query": "What feedback fields should we log for AI quality loop?",
+      "expectedKeywords": ["feedback", "rating", "issue"]
+    },
+
+    {
+      "query": "How to validate if an answer is grounded in retrieved chunks?",
+      "expectedKeywords": ["grounded", "chunk", "source"]
+    },
+    {
+      "query": "What is a good no-answer response policy?",
+      "expectedKeywords": ["no-answer", "clarification", "policy"]
+    },
+    {
+      "query": "Write concise guidance for support agents using AI in Orion.",
+      "expectedKeywords": ["support", "ai", "guidance"]
+    },
+    {
+      "query": "How to monitor token usage for AI conversations?",
+      "expectedKeywords": ["token", "usage", "cost"]
+    },
+    {
+      "query": "What should be included in weekly RAG quality report?",
+      "expectedKeywords": ["weekly", "report", "quality"]
+    }
+  ]
+}

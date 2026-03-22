@@ -15,10 +15,6 @@ export class BoardColumnService {
     private boardRepo: Repository<TaskBoard>,
   ) {}
 
-  /**
-   * Thêm column mới vào board
-   * - Tự động tính order = số column hiện tại (thêm vào cuối)
-   */
   async create(boardId: string, dto: CreateBoardColumnDto) {
     const board = await this.boardRepo.findOne({ where: { boardId } });
     if (!board) throw new NotFoundException('Board not found');
@@ -32,15 +28,12 @@ export class BoardColumnService {
       status: dto.status,
       color: dto.color ?? '#94a3b8',
       taskLimit: dto.taskLimit,
-      order: count, // thêm vào cuối
+      order: count,
       board,
     });
     return this.columnRepo.save(column);
   }
 
-  /**
-   * Cập nhật column (tên, màu, giới hạn task)
-   */
   async update(boardId: string, columnId: string, dto: UpdateBoardColumnDto) {
     const column = await this.columnRepo.findOne({
       where: { columnId, board: { boardId } },
@@ -51,10 +44,6 @@ export class BoardColumnService {
     return this.columnRepo.save(column);
   }
 
-  /**
-   * Xóa column
-   * - Tasks trong column sẽ được set column = null (ON DELETE SET NULL)
-   */
   async remove(boardId: string, columnId: string) {
     const column = await this.columnRepo.findOne({
       where: { columnId, board: { boardId } },
@@ -63,10 +52,6 @@ export class BoardColumnService {
     return this.columnRepo.remove(column);
   }
 
-  /**
-   * Sắp xếp lại thứ tự columns
-   * - Nhận mảng columnIds theo thứ tự mong muốn
-   */
   async reorder(boardId: string, columnIds: string[]) {
     for (let i = 0; i < columnIds.length; i++) {
       await this.columnRepo.update(

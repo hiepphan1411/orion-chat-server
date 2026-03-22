@@ -1,4 +1,3 @@
-// bổ sung - entity mới: cột trong board (To Do, In Progress, Review, Done)
 import { TaskStatus } from 'src/common/enums/task-status.enum';
 import { Task } from 'src/modules/task/entities/task.entity';
 import { TaskBoard } from 'src/modules/task-board/entities/task-board.entity';
