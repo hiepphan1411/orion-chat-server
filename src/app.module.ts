@@ -40,8 +40,9 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { Conversation } from './modules/conversation/entities/conversation.schema';
 import { CommonModule } from './common/common.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
 
 @Module({
   imports: [
@@ -106,6 +107,7 @@ import { CommonModule } from './common/common.module';
     ActivityLogModule,
     AttachmentModule,
     NotesModule,
+    ConversationModule,
   ],
 })
 export class AppModule {}

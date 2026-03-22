@@ -23,16 +23,30 @@ export class Message {
   isPinned: boolean;
 
   @Prop({ default: false })
-  isDelete: boolean;
+  isDeleted: boolean;
 
-  @Prop({ required: true })
-  replyToMessageId: string;
+  @Prop({ default: null })
+  replyToMessageId?: string;
 
   @Prop({ required: true })
   senderBy: string;
 
   @Prop({ required: true })
   conversationId: string;
+
+  @Prop()
+  clientMessageId: string;
+
+  @Prop({
+    type: [
+      {
+        userId: { type: String },
+        seenAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  seenBy: Array<{ userId: string; seenAt: Date }>;
 
   @Prop({
     type: String,
@@ -50,3 +64,5 @@ export class Message {
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
+MessageSchema.index({ conversationId: 1, senderBy: 1, clientMessageId: 1 });

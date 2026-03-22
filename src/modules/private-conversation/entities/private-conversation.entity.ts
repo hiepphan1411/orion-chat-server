@@ -1,4 +1,4 @@
-import { Conversation } from 'src/modules/conversation/entities/conversation.entity';
+import { Conversation } from 'src/modules/conversation/entities/conversation.schema';
 import { ChildEntity } from 'typeorm';
 
 @ChildEntity()
