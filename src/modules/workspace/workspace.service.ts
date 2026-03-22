@@ -4,10 +4,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { Workspace } from './entities/workspace.entity';
 import { WorkspaceMember } from '../workspace-member/entities/workspace-member.entity';
 import { User } from '../users/entities/user.entity';
+import { Task } from '../task/entities/task.entity';
+import { TaskAssignee } from '../task/entities/task-assignee.entity';
+import { TaskBoard } from '../task-board/entities/task-board.entity';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
@@ -21,11 +24,16 @@ export class WorkspaceService {
     private memberRepo: Repository<WorkspaceMember>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(Task)
+    private taskRepo: Repository<Task>,
+    @InjectRepository(TaskAssignee)
+    private taskAssigneeRepo: Repository<TaskAssignee>,
+    @InjectRepository(TaskBoard)
+    private taskBoardRepo: Repository<TaskBoard>,
   ) {}
 
   /**
    * Tạo workspace mới
-   * - Tự động thêm owner vào bảng workspace_member với role OWNER
    */
   async create(dto: CreateWorkspaceDto) {
     const owner = await this.userRepo.findOne({
@@ -45,7 +53,6 @@ export class WorkspaceService {
     });
     const saved = await this.workspaceRepo.save(workspace);
 
-    // Auto-add owner là thành viên đầu tiên
     const member = this.memberRepo.create({
       workspace: saved,
       user: owner,
@@ -58,7 +65,6 @@ export class WorkspaceService {
 
   /**
    * Lấy tất cả workspace mà user tham gia
-   * - Query qua bảng workspace_member → lấy workspace kèm members, boards
    */
   async findAllForUser(userId: string) {
     const memberships = await this.memberRepo.find({
@@ -76,7 +82,6 @@ export class WorkspaceService {
 
   /**
    * Lấy chi tiết workspace theo ID
-   * - Kèm theo: owner, members (user), boards (columns)
    */
   async findOne(id: string) {
     const workspace = await this.workspaceRepo.findOne({
@@ -109,5 +114,195 @@ export class WorkspaceService {
   async remove(id: string) {
     const workspace = await this.findOne(id);
     return this.workspaceRepo.remove(workspace);
+  }
+
+  /**
+   * Aggregate workload cho tất cả members trong workspace
+   */
+  async getWorkload(workspaceId: string) {
+    const members = await this.memberRepo.find({
+      where: { workspace: { workspaceId } },
+      relations: ['user'],
+    });
+
+    const boards = await this.taskBoardRepo.find({
+      where: { workspace: { workspaceId } },
+    });
+    const boardIds = boards.map((b) => b.boardId);
+
+    if (boardIds.length === 0) {
+      return members.map((m) => ({
+        user: m.user,
+        totalTasks: 0,
+        todoTasks: 0,
+        inProgressTasks: 0,
+        reviewTasks: 0,
+        doneTasks: 0,
+        overdueTasks: 0,
+        lowPriority: 0,
+        mediumPriority: 0,
+        highPriority: 0,
+        urgentPriority: 0,
+      }));
+    }
+
+    const result: Array<{
+      user: (typeof members)[0]['user'];
+      totalTasks: number;
+      todoTasks: number;
+      inProgressTasks: number;
+      reviewTasks: number;
+      doneTasks: number;
+      overdueTasks: number;
+      lowPriority: number;
+      mediumPriority: number;
+      highPriority: number;
+      urgentPriority: number;
+    }> = [];
+    for (const member of members) {
+      const assignees = await this.taskAssigneeRepo
+        .createQueryBuilder('ta')
+        .innerJoinAndSelect('ta.task', 'task')
+        .where('ta.user.userId = :userId', { userId: member.user.userId })
+        .andWhere('task.board.boardId IN (:...boardIds)', { boardIds })
+        .getMany();
+
+      const tasks = assignees.map((a) => a.task);
+      const now = new Date();
+
+      result.push({
+        user: member.user,
+        totalTasks: tasks.length,
+        todoTasks: tasks.filter((t) => t.status === 'TODO').length,
+        inProgressTasks: tasks.filter((t) => t.status === 'IN_PROGRESS').length,
+        reviewTasks: tasks.filter((t) => t.status === 'REVIEW').length,
+        doneTasks: tasks.filter((t) => t.status === 'DONE').length,
+        overdueTasks: tasks.filter(
+          (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'DONE',
+        ).length,
+        lowPriority: tasks.filter((t) => t.priority === 'LOW').length,
+        mediumPriority: tasks.filter((t) => t.priority === 'MEDIUM').length,
+        highPriority: tasks.filter((t) => t.priority === 'HIGH').length,
+        urgentPriority: tasks.filter((t) => t.priority === 'URGENT').length,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Aggregate reports cho workspace
+   */
+  async getReports(workspaceId: string) {
+    const boards = await this.taskBoardRepo.find({
+      where: { workspace: { workspaceId } },
+    });
+    const boardIds = boards.map((b) => b.boardId);
+
+    if (boardIds.length === 0) {
+      return {
+        period: {
+          totalTasks: 0,
+          completedTasks: 0,
+          newTasks: 0,
+          completionRate: 0,
+        },
+        boards: [],
+        members: [],
+        overdue: [],
+      };
+    }
+
+    const allTasks = await this.taskRepo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.assignees', 'assignees')
+      .leftJoinAndSelect('assignees.user', 'assigneeUser')
+      .where('t.board.boardId IN (:...boardIds)', { boardIds })
+      .getMany();
+
+    const totalTasks = allTasks.length;
+    const completedTasks = allTasks.filter((t) => t.status === 'DONE').length;
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const newTasks = allTasks.filter(
+      (t) => new Date(t.createdAt) >= thirtyDaysAgo,
+    ).length;
+
+    const boardsReport = boards.map((board) => {
+      const boardTasks = allTasks.filter(
+        (t) => t.board?.boardId === board.boardId,
+      );
+      return {
+        boardId: board.boardId,
+        boardName: board.boardName,
+        totalTasks: boardTasks.length,
+        completedTasks: boardTasks.filter((t) => t.status === 'DONE').length,
+        inProgressTasks: boardTasks.filter((t) => t.status === 'IN_PROGRESS')
+          .length,
+      };
+    });
+
+    const memberMap = new Map<string, { user: any; tasks: Task[] }>();
+    for (const task of allTasks) {
+      for (const assignee of task.assignees ?? []) {
+        const uid = assignee.user?.userId;
+        if (!uid) continue;
+        if (!memberMap.has(uid)) {
+          memberMap.set(uid, { user: assignee.user, tasks: [] });
+        }
+        memberMap.get(uid)!.tasks.push(task);
+      }
+    }
+
+    const membersReport = Array.from(memberMap.values()).map(
+      ({ user, tasks }) => {
+        const done = tasks.filter((t) => t.status === 'DONE');
+        const avgDays =
+          done.length > 0
+            ? done.reduce((sum, t) => {
+                const created = new Date(t.createdAt).getTime();
+                const completed = t.completedAt
+                  ? new Date(t.completedAt).getTime()
+                  : now.getTime();
+                return sum + (completed - created) / (1000 * 60 * 60 * 24);
+              }, 0) / done.length
+            : 0;
+
+        return {
+          user,
+          totalTasks: tasks.length,
+          completedTasks: done.length,
+          avgCompletionDays: Math.round(avgDays * 10) / 10,
+        };
+      },
+    );
+
+    const overdueTasks = allTasks
+      .filter(
+        (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'DONE',
+      )
+      .map((t) => ({
+        taskId: t.taskId,
+        title: t.title,
+        dueDate: t.dueDate,
+        assignees: (t.assignees ?? []).map((a) => a.user),
+        daysOverdue: Math.ceil(
+          (now.getTime() - new Date(t.dueDate!).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ),
+      }));
+
+    return {
+      period: {
+        totalTasks,
+        completedTasks,
+        newTasks,
+        completionRate:
+          totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      },
+      boards: boardsReport,
+      members: membersReport,
+      overdue: overdueTasks,
+    };
   }
 }

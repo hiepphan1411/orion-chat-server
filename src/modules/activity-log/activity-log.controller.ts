@@ -17,4 +17,9 @@ export class ActivityLogController {
   findByTask(@Param('taskId') taskId: string) {
     return this.activityLogService.findByTask(taskId);
   }
+
+  @Get('workspaces/:workspaceId/activities')
+  findByWorkspace(@Param('workspaceId') workspaceId: string) {
+    return this.activityLogService.findByWorkspace(workspaceId);
+  }
 }
