@@ -48,6 +48,17 @@ export class User {
   @Column({ default: true })
   isActive: boolean;
 
+  // Single Session Login
+  @Column({ nullable: true })
+  currentSessionToken: string;
+
+  @Column({ nullable: true })
+  lastLoginAt: Date;
+
+  // Session Timeout
+  @Column({ type: 'bigint', nullable: true })
+  lastActivityAt: number;
+
   @ManyToOne(() => File)
   fileUser: File;
 

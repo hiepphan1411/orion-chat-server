@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -23,6 +24,7 @@ export class AuthService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
 
+    private jwtService: JwtService,
     private configService: ConfigService,
   ) {
     this.esmsApiKey = this.configService.get('ESMS_API_KEY') || '';
@@ -35,49 +37,7 @@ export class AuthService {
   }
 
   private generateJwtToken(phoneNumber: string): string {
-    const jwtSecret = this.configService.get('JWT_SECRET') || 'your-secret-key';
-    const jwtExpiresIn = this.configService.get('JWT_EXPIRES_IN') || '24h';
-
-    // Generate simple JWT token manually
-    const header = Buffer.from(
-      JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
-    ).toString('base64');
-    const payload = Buffer.from(
-      JSON.stringify({
-        phoneNumber,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + this.parseExpiry(jwtExpiresIn),
-      }),
-    ).toString('base64');
-
-    const crypto = require('crypto');
-    const signature = crypto
-      .createHmac('sha256', jwtSecret)
-      .update(`${header}.${payload}`)
-      .digest('base64');
-
-    return `${header}.${payload}.${signature}`;
-  }
-
-  private parseExpiry(expiresIn: string): number {
-    const match = expiresIn.match(/^(\d+)([a-z]+)$/);
-    if (!match) return 86400; // default 24h
-
-    const value = parseInt(match[1]);
-    const unit = match[2];
-
-    switch (unit) {
-      case 's':
-        return value;
-      case 'm':
-        return value * 60;
-      case 'h':
-        return value * 3600;
-      case 'd':
-        return value * 86400;
-      default:
-        return 86400;
-    }
+    return this.jwtService.sign({ phoneNumber });
   }
 
   async sendOtp(phoneNumber: string) {
@@ -196,6 +156,7 @@ export class AuthService {
   ): Promise<void> {
     try {
       // Validate eSMS credentials
+
       if (!this.esmsApiKey || !this.esmsSecretKey) {
         this.logger.warn(
           'eSMS credentials not configured. OTP saved to DB but SMS not sent.',
@@ -225,7 +186,7 @@ export class AuthService {
 
       // Check if eSMS API returned success (CodeResult: "100")
       if (response?.data?.CodeResult === '100') {
-        this.logger.log(`✓ OTP successfully sent to ${phoneNumber}`);
+        this.logger.log(`OTP successfully sent to ${phoneNumber}`);
       } else {
         this.logger.warn(
           `⚠ eSMS response code: ${response?.data?.CodeResult}, message: ${response?.data?.ErrorMessage}`,
@@ -257,6 +218,7 @@ export class AuthService {
       }
 
       // Check if OTP has expired
+
       if (record.expiresAt < new Date()) {
         throw new BadRequestException('OTP đã hết hạn');
       }
@@ -298,6 +260,7 @@ export class AuthService {
       }
 
       // Check if phone number already exists
+
       const existingUser = await this.userRepo.findOne({
         where: { phoneNumber: data.phoneNumber },
       });
@@ -309,6 +272,7 @@ export class AuthService {
       }
 
       // Validate password strength
+
       if (data.password.length < 8) {
         throw new BadRequestException('Mật khẩu phải có ít nhất 8 ký tự');
       }
@@ -317,6 +281,7 @@ export class AuthService {
       const hash = await bcrypt.hash(data.password, 10);
 
       // Create and save user
+
       const user = this.userRepo.create({
         phoneNumber: data.phoneNumber,
         passwordHash: hash,
@@ -328,6 +293,7 @@ export class AuthService {
       const savedUser = await this.userRepo.save(user);
 
       // Delete OTP after successful registration
+
       await this.otpRepo.delete({ phoneNumber: data.phoneNumber });
 
       this.logger.log(`User registered successfully: ${data.phoneNumber}`);
@@ -363,6 +329,7 @@ export class AuthService {
       this.logger.log(`🔐 Login attempt for: ${phoneNumber}`);
 
       // Find user by phone number
+
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
       });
@@ -373,6 +340,7 @@ export class AuthService {
       }
 
       // Compare password
+
       const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
       if (!isPasswordValid) {
@@ -385,7 +353,14 @@ export class AuthService {
       // Generate JWT token
       const token = this.generateJwtToken(phoneNumber);
 
-      // Log to console in development
+      // Single Session Login: Save token to database and invalidate old session
+
+      user.currentSessionToken = token;
+      user.lastLoginAt = new Date();
+      // Session Timeout: Initialize activity timestamp
+      user.lastActivityAt = Date.now();
+      await this.userRepo.save(user);
+
       console.log(`\n${'='.repeat(60)}`);
       console.log(`LOGIN SUCCESSFUL`);
       console.log(`${'='.repeat(60)}`);
@@ -396,6 +371,7 @@ export class AuthService {
       console.log(`${'='.repeat(60)}\n`);
 
       // Return user data with JWT token
+
       return {
         success: true,
         message: 'Đăng nhập thành công',
@@ -406,6 +382,15 @@ export class AuthService {
           birthDate: user.birthDate,
           gender: user.gender,
           loginTime: new Date().toISOString(),
+          userId: user.userId,
+          email: user.email,
+          avatarUrl: user.avatarUrl,
+          coverImage: user.coverImage,
+          isOnline: user.isOnline,
+          showOnlineStatus: user.showOnlineStatus,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+          lastLoginAt: user.lastLoginAt,
         },
         timestamp: new Date().toISOString(),
       };
@@ -415,6 +400,43 @@ export class AuthService {
         ? error
         : new BadRequestException(
             error.message || 'Lỗi đăng nhập. Vui lòng thử lại.',
+          );
+    }
+  }
+
+  async logout(phoneNumber: string) {
+    try {
+      this.logger.log(`🚪 Logout attempt for: ${phoneNumber}`);
+
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Người dùng không tồn tại');
+      }
+
+      // Clear session token
+
+      user.currentSessionToken = null as unknown as string;
+      await this.userRepo.save(user);
+
+      this.logger.log(`✓ Logout successful for: ${phoneNumber}`);
+
+      return {
+        success: true,
+        message: 'Đăng xuất thành công',
+        data: {
+          phoneNumber: user.phoneNumber,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error during logout:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi đăng xuất. Vui lòng thử lại.',
           );
     }
   }

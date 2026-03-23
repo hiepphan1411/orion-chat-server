@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { UsersModule } from './modules/users/users.module';
 import { TaskModule } from './modules/task/task.module';
@@ -53,8 +53,15 @@ import { Conversation } from './modules/conversation/entities/conversation.entit
       synchronize: true,
     }),
 
-    // MongoDB
-    MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
+    // MongoDB - Using environment variable
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        uri:
+          configService.get<string>('MONGO_URI') ||
+          'mongodb://localhost:27017/orion_chat',
+      }),
+    }),
 
     // Modules
     UsersModule,
