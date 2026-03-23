@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
@@ -128,8 +128,15 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
       synchronize: true,
     }),
 
-    // MongoDB
-    MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
+    // MongoDB - Using environment variable
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        uri:
+          configService.get<string>('MONGO_URI') ||
+          'mongodb://localhost:27017/orion_chat',
+      }),
+    }),
 
     // Common Module (provides JwtAuthGuard globally)
     CommonModule,
