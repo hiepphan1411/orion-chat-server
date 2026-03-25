@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-base-to-string */
+/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
@@ -22,13 +24,19 @@ export class MessageService {
     messageType?: string;
     replyToMessageId?: string;
     clientMessageId?: string;
+    mediaUrl?: string;
+    fileName?: string;
+    fileSize?: number;
   }) {
     const normalizedType = this.normalizeMessageType(payload.messageType);
 
     return this.messageModel.create({
       conversationId: payload.conversationId,
       senderBy: payload.senderBy,
-      content: payload.content,
+      content: payload.content || '',
+      mediaUrl: payload.mediaUrl,
+      fileName: payload.fileName,
+      fileSize: payload.fileSize,
       messageType: normalizedType,
       replyToMessageId: payload.replyToMessageId,
       clientMessageId: payload.clientMessageId,

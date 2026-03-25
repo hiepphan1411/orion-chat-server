@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -34,6 +37,8 @@ type AckError = {
 };
 
 type Ack<T> = AckSuccess<T> | AckError;
+
+type ChatClientMessageType = 'text' | 'image' | 'file' | 'audio' | 'video';
 
 @WebSocketGateway({
   namespace: '/chat',
@@ -137,8 +142,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clientMessageId: string;
       conversationId: string;
       receiverId: string;
-      type: 'text' | 'image' | 'file' | 'audio';
-      content: string;
+      type: 'text' | 'image' | 'file' | 'audio' | 'video';
+      content?: string;
+      mediaUrl?: string;
+      fileName?: string;
+      fileSize?: number;
       replyToMessageId?: string;
       meta?: Record<string, unknown>;
     },
@@ -154,8 +162,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       receiverId,
       type,
       content,
+      mediaUrl,
+      fileName,
+      fileSize,
       replyToMessageId,
+      meta,
     } = payload || {};
+
+    const normalizedType = this.normalizeMessageType(type || MessageType.TEXT);
+    const normalizedContent = (content || '').trim();
+    const normalizedMediaUrl = (
+      mediaUrl ||
+      this.getStringMeta(meta, 'mediaUrl') ||
+      ''
+    ).trim();
+    const normalizedFileName = (
+      fileName ||
+      this.getStringMeta(meta, 'fileName') ||
+      ''
+    ).trim();
+    const normalizedFileSize =
+      fileSize || Number(this.getStringMeta(meta, 'fileSize') || 0);
+    const requiresMedia = this.requiresMedia(normalizedType);
+    const normalizedContentForMedia =
+      requiresMedia && normalizedContent === normalizedMediaUrl
+        ? ''
+        : normalizedContent;
 
     if (
       !senderId ||
@@ -163,8 +195,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       !clientMessageId ||
       !conversationId ||
       !receiverId ||
-      !type ||
-      !content
+      !type
     ) {
       const ack: Ack<null> = {
         ok: false,
@@ -172,6 +203,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         error: {
           code: 'CHAT_INVALID_PAYLOAD',
           message: 'missing required fields',
+          retriable: false,
+        },
+      };
+      client.emit('chat:ack', ack);
+      return;
+    }
+
+    if (normalizedType === MessageType.TEXT && !normalizedContent) {
+      const ack: Ack<null> = {
+        ok: false,
+        requestId,
+        error: {
+          code: 'CHAT_INVALID_PAYLOAD',
+          message: 'content is required for text message',
+          retriable: false,
+        },
+      };
+      client.emit('chat:ack', ack);
+      return;
+    }
+
+    if (requiresMedia && !normalizedMediaUrl) {
+      const ack: Ack<null> = {
+        ok: false,
+        requestId,
+        error: {
+          code: 'CHAT_INVALID_PAYLOAD',
+          message: 'mediaUrl is required for media message',
           retriable: false,
         },
       };
@@ -204,25 +263,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const created = await this.messageModel.create({
       conversationId,
       senderBy: senderId,
-      content,
-      messageType: this.normalizeMessageType(type),
+      content: normalizedContentForMedia,
+      mediaUrl: normalizedMediaUrl || undefined,
+      fileName: normalizedFileName || undefined,
+      fileSize: normalizedFileSize > 0 ? normalizedFileSize : undefined,
+      messageType: normalizedType,
       replyToMessageId: replyToMessageId,
       messageStatus: 'SENT',
       clientMessageId,
     });
 
-    const message = {
-      messageId: String(created._id),
-      clientMessageId,
-      conversationId,
-      senderId,
-      type,
-      content,
-      replyToMessageId: created.replyToMessageId,
-      status: created.messageStatus,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      createdAt: (created as any).createdAt,
-    };
+    const message = this.toClientMessage(created, senderId);
 
     const ack: Ack<{ message: typeof message }> = {
       ok: true,
@@ -293,20 +344,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const filter: any = { conversationId, isDelete: false };
+    const filter: any = { conversationId, isDeleted: false };
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (cursor) filter.createdAt = { $lt: new Date(cursor) };
 
-    const items = await this.messageModel
+    const rawItems = await this.messageModel
       .find(filter)
       .sort({ createdAt: -1 })
       .limit(pageSize)
       .lean();
 
+    const items = rawItems.map((item) => this.toClientMessage(item));
+
     const nextCursor =
-      items.length === pageSize
-        ? // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
-          new Date((items[items.length - 1] as any).createdAt).toISOString()
+      rawItems.length === pageSize
+        ? new Date(
+            (rawItems[rawItems.length - 1] as any).createdAt,
+          ).toISOString()
         : null;
 
     const ack: Ack<{
@@ -346,6 +400,63 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return MessageType.STICKER;
       default:
         return MessageType.TEXT;
+    }
+  }
+
+  private getStringMeta(
+    meta: Record<string, unknown> | undefined,
+    key: string,
+  ): string | undefined {
+    const value = meta?.[key];
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  private requiresMedia(messageType: MessageType): boolean {
+    return (
+      messageType === MessageType.IMAGE ||
+      messageType === MessageType.FILE ||
+      messageType === MessageType.AUDIO ||
+      messageType === MessageType.VIDEO ||
+      messageType === MessageType.VOICE_MESSAGE
+    );
+  }
+
+  private toClientMessage(message: any, fallbackSenderId?: string) {
+    const mediaUrl = String(message.mediaUrl || '');
+    const messageType = this.toClientType(
+      String(message.messageType || 'TEXT'),
+    );
+
+    return {
+      messageId: String(message._id || ''),
+      clientMessageId: String(message.clientMessageId || ''),
+      conversationId: String(message.conversationId || ''),
+      senderId: String(message.senderBy || fallbackSenderId || ''),
+      type: messageType,
+      content: String(message.content || ''),
+      mediaUrl: mediaUrl || undefined,
+      imageUrl: messageType === 'image' ? mediaUrl || undefined : undefined,
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      replyToMessageId: message.replyToMessageId,
+      status: message.messageStatus,
+      createdAt: message.createdAt,
+    };
+  }
+
+  private toClientType(messageType: string): ChatClientMessageType {
+    switch (String(messageType || '').toUpperCase()) {
+      case MessageType.IMAGE:
+        return 'image';
+      case MessageType.FILE:
+        return 'file';
+      case MessageType.AUDIO:
+      case MessageType.VOICE_MESSAGE:
+        return 'audio';
+      case MessageType.VIDEO:
+        return 'video';
+      default:
+        return 'text';
     }
   }
 }
