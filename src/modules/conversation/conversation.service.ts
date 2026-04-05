@@ -75,7 +75,7 @@ export class ConversationService {
       (m) => m.conversation.conversationId,
     );
 
-    const messageMap = await this.getLastMessageMap(conversationIds);
+    const messageMap = await this.getLastMessageMap(conversationIds, userId);
 
     return memberships.map((m) => {
       const convId = m.conversation.conversationId;
@@ -92,6 +92,7 @@ export class ConversationService {
       conversationId,
       undefined,
       1,
+      userId,
     );
 
     const latestMsg = lastMessageArr.length > 0 ? lastMessageArr[0] : null;
@@ -111,6 +112,7 @@ export class ConversationService {
       conversationId,
       cursor,
       pageSize,
+      userId,
     );
 
     const lastItem = items[items.length - 1];
@@ -189,13 +191,14 @@ export class ConversationService {
     );
   }
 
-  private async getLastMessageMap(conversationIds: string[]) {
+  private async getLastMessageMap(conversationIds: string[], userId?: string) {
     const flatLastMessages = await this.messageModel
       .aggregate<LastMessageAggregateRow>([
         {
           $match: {
             conversationId: { $in: conversationIds },
             isDeleted: false,
+            ...(userId ? { deletedForUsers: { $ne: userId } } : {}),
           },
         },
         { $sort: { createdAt: -1 } },
@@ -220,6 +223,7 @@ export class ConversationService {
           $match: {
             'messages.conversationId': { $in: conversationIds },
             'messages.isDeleted': false,
+            ...(userId ? { 'messages.deletedForUsers': { $ne: userId } } : {}),
           },
         },
         { $sort: { 'messages.createdAt': -1 } },
@@ -258,6 +262,7 @@ export class ConversationService {
     conversationId: string,
     cursor?: string,
     limit = 30,
+    userId?: string,
   ): Promise<MessageDetail[]> {
     const pageSize = Math.min(Math.max(limit, 1), 100);
     const cursorDate = cursor ? new Date(cursor) : null;
@@ -265,11 +270,16 @@ export class ConversationService {
     const flatFilter: {
       conversationId: string;
       isDeleted: boolean;
+      deletedForUsers?: { $ne: string };
       createdAt?: { $lt: Date };
     } = {
       conversationId,
       isDeleted: false,
     };
+
+    if (userId) {
+      flatFilter.deletedForUsers = { $ne: userId };
+    }
 
     if (cursorDate && !Number.isNaN(cursorDate.getTime())) {
       flatFilter.createdAt = { $lt: cursorDate };
@@ -292,6 +302,7 @@ export class ConversationService {
         $match: {
           'messages.conversationId': conversationId,
           'messages.isDeleted': false,
+          ...(userId ? { 'messages.deletedForUsers': { $ne: userId } } : {}),
         },
       },
     ];

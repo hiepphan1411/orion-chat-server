@@ -25,8 +25,14 @@ export class Message {
   @Prop({ default: false })
   isDeleted: boolean;
 
+  @Prop({ type: [String], default: [] })
+  deletedForUsers: string[];
+
   @Prop({ default: null })
   replyToMessageId?: string;
+
+  @Prop({ default: null })
+  forwardedFromMessageId?: string;
 
   @Prop({ required: true })
   senderBy: string;
@@ -47,6 +53,18 @@ export class Message {
     default: [],
   })
   seenBy: Array<{ userId: string; seenAt: Date }>;
+
+  @Prop({
+    type: [
+      {
+        userId: { type: String, required: true },
+        emoji: { type: String, required: true },
+        reactedAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
 
   @Prop({
     type: String,

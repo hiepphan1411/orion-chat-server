@@ -131,9 +131,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
 
     // MongoDB
     // MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
-    MongooseModule.forRoot(
-      'mongodb+srv://mongobasic:mongo123@cluster0.pro5bts.mongodb.net/orion_chat?retryWrites=true&w=majority&appName=Cluster0',
-    ),
+    MongooseModule.forRoot(process.env.MONGO_URI!),
 
     // Common Module (provides JwtAuthGuard globally)
     CommonModule,

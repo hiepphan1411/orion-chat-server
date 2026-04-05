@@ -46,7 +46,7 @@ type ChatClientMessageType = 'text' | 'image' | 'file' | 'audio' | 'video';
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
 
@@ -91,6 +91,44 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         at: new Date().toISOString(),
       });
     }
+  }
+
+  emitMessageReactionUpdated(payload: {
+    conversationId: string;
+    messageId: string;
+    reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
+    actedBy: string;
+    action: 'set' | 'remove';
+    emoji?: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_reaction_updated', {
+        conversationId: payload.conversationId,
+        messageId: payload.messageId,
+        reactions: payload.reactions,
+        actedBy: payload.actedBy,
+        action: payload.action,
+        emoji: payload.emoji,
+        at: new Date().toISOString(),
+      });
+  }
+
+  emitMessageRecalled(payload: {
+    conversationId: string;
+    messageId: string;
+    revokedBy: string;
+    revokedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_recalled', {
+        conversationId: payload.conversationId,
+        messageId: payload.messageId,
+        revokedBy: payload.revokedBy,
+        revokedAt: payload.revokedAt,
+        isDeleted: true,
+      });
   }
 
   @SubscribeMessage('chat:join_conversation')
@@ -329,6 +367,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const { requestId, conversationId, cursor, limit } = payload || {};
     const pageSize = Math.min(Math.max(limit || 30, 1), 100);
+    const requesterUserId =
+      (client.handshake.auth?.userId as string) ||
+      (client.handshake.query.userId as string);
 
     if (!requestId || !conversationId) {
       const ack: Ack<null> = {
@@ -345,6 +386,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const filter: any = { conversationId, isDeleted: false };
+    if (requesterUserId) {
+      filter.deletedForUsers = { $ne: requesterUserId };
+    }
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (cursor) filter.createdAt = { $lt: new Date(cursor) };
 
@@ -438,6 +482,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       imageUrl: messageType === 'image' ? mediaUrl || undefined : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
+      forwardedFromMessageId: message.forwardedFromMessageId,
+      reactions: Array.isArray(message.reactions) ? message.reactions : [],
       replyToMessageId: message.replyToMessageId,
       status: message.messageStatus,
       createdAt: message.createdAt,
