@@ -89,7 +89,10 @@ export class JwtAuthGuard implements CanActivate {
     const expectedSignature = crypto
       .createHmac('sha256', secret)
       .update(`${headerB64}.${payloadB64}`)
-      .digest('base64');
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
 
     // Verify signature
     if (signatureB64 !== expectedSignature) {

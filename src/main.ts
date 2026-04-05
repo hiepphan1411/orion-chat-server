@@ -6,22 +6,24 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:5174',
+    'http://localhost:3001',
+    'https://d1m0lu9iwqsfsh.cloudfront.net',
+    'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com',
+  ];
+
+  // tăng giới hạn kích thước yêu cầu cho các tệp đính kèm AI (âm thanh/hình ảnh base64).
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   app.enableCors({
-    origin: [
-      '*',
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:5174',
-      'http://localhost:3001',
-      'https://d1m0lu9iwqsfsh.cloudfront.net',
-      'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com/',
-    ],
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Platform'],
     credentials: true,
+    optionsSuccessStatus: 204,
   });
 
   app.useGlobalPipes(
