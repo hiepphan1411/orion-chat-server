@@ -17,6 +17,8 @@ async function bootstrap() {
       'http://localhost:3000',
       'http://localhost:5174',
       'http://localhost:3001',
+      'https://d1m0lu9iwqsfsh.cloudfront.net',
+      'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com/',
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
