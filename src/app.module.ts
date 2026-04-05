@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
+import configuration from './config/config';
+
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
 import { NotificationModule } from './modules/notifications/notification.module';
@@ -78,54 +80,59 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
     // ENV config
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [configuration],
     }),
 
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres',
-      password: '123456789',
-      database: 'orion_chat',
-      entities: [
-        User,
-        Task,
-        TaskAssignee,
-        TaskBoard,
-        TaskList,
-        Workspace,
-        WorkspaceMember,
-        BoardColumn,
-        Label,
-        Report,
-        Admin,
-        Conversation,
-        SubTask,
-        Comment,
-        Attachment,
-        ActivityLog,
-        PersonalNote,
-        NoteCategory,
-        FriendRequest,
-        Friendship,
-        GroupConversation,
-        GroupMember,
-        GroupInvite,
-        CalendarEvent,
-        CalendarEventParticipant,
-        AutomationRule,
-        Document,
-        DocumentVersion,
-        InlineComment,
-        WorkspaceFile,
-        Goal,
-        KeyResult,
-        Sprint,
-        Epic,
-        Milestone,
-      ],
-      autoLoadEntities: true,
-      synchronize: true,
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        url: configService.get<string>('database.url') || undefined,
+        host: configService.get<string>('database.host'),
+        port: configService.get<number>('database.port'),
+        username: configService.get<string>('database.username'),
+        password: configService.get<string>('database.password'),
+        database: configService.get<string>('database.database'),
+        entities: [
+          User,
+          Task,
+          TaskAssignee,
+          TaskBoard,
+          TaskList,
+          Workspace,
+          WorkspaceMember,
+          BoardColumn,
+          Label,
+          Report,
+          Admin,
+          Conversation,
+          SubTask,
+          Comment,
+          Attachment,
+          ActivityLog,
+          PersonalNote,
+          NoteCategory,
+          FriendRequest,
+          Friendship,
+          GroupConversation,
+          GroupMember,
+          GroupInvite,
+          CalendarEvent,
+          CalendarEventParticipant,
+          AutomationRule,
+          Document,
+          DocumentVersion,
+          InlineComment,
+          WorkspaceFile,
+          Goal,
+          KeyResult,
+          Sprint,
+          Epic,
+          Milestone,
+        ],
+        autoLoadEntities: true,
+        synchronize: true,
+      }),
     }),
 
     // MongoDB - Using environment variable
@@ -133,7 +140,7 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         uri:
-          configService.get<string>('MONGO_URI') ||
+          configService.get<string>('mongodb.uri') ||
           'mongodb://localhost:27017/orion_chat',
       }),
     }),

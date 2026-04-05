@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import { DataSource, In, Repository } from 'typeorm';
 import { Conversation } from 'src/modules/conversation/entities/conversation.entity';
 import { Admin } from 'src/modules/admin/entities/admin.entity';

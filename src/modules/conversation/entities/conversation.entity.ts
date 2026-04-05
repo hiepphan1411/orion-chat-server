@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 
 @Entity()
-@TableInheritance({ column: { type: 'varchar', name: 'type' } })
+@TableInheritance({ column: { type: 'varchar', name: 'type', nullable: true } })
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
   conversationId: string;
@@ -16,8 +16,8 @@ export class Conversation {
   @Column()
   createdAt: Date;
 
-  @Column()
-  lastMessageId: string;
+  @Column({ type: 'varchar', nullable: true })
+  lastMessageId: string | null;
 
   @OneToMany(() => Report, (report) => report.conversation)
   reports: Report[];
