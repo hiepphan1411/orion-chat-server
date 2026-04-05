@@ -72,6 +72,7 @@ import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -162,6 +163,7 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
     AttachmentModule,
     NotesModule,
     FriendRequestModule,
+    UsersModule,
     GroupInviteModule,
     FriendsModule,
     PresenceModule,

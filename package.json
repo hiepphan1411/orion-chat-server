@@ -21,6 +21,7 @@
     "test:auth": "ts-node test/auth-registration.e2e-spec.ts",
     "test:otp": "ts-node generate-test-otp.ts",
     "seed:friend-list": "ts-node -r tsconfig-paths/register src/scripts/seed-friend-list.ts",
+    "seed:user-profile": "ts-node -r tsconfig-paths/register src/scripts/seed-user-profile.ts",
     "rag:train": "node rag-training/run-rag-training-pipeline.js",
     "rag:train:dry": "node rag-training/run-rag-training-pipeline.js --dry-run"
   },

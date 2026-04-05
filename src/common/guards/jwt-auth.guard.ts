@@ -89,7 +89,7 @@ export class JwtAuthGuard implements CanActivate {
     const expectedSignature = crypto
       .createHmac('sha256', secret)
       .update(`${headerB64}.${payloadB64}`)
-      .digest('base64');
+      .digest('base64url');
 
     // Verify signature
     if (signatureB64 !== expectedSignature) {
@@ -97,7 +97,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // Decode and parse payload
-    const payloadJson = Buffer.from(payloadB64, 'base64').toString('utf-8');
+    const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
     const payload = JSON.parse(payloadJson) as JwtPayload;
 
     // Check expiry
