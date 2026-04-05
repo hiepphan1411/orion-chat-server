@@ -108,21 +108,18 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại không tồn tại');
       }
 
-      // Delete old OTP for this phone number
+      // xóa OTP cũ cho số điện thoại này
       await this.otpRepo.delete({ phoneNumber });
 
       const otp = this.generateOtp();
-
-      // Log to console in development
-      console.log(`\n${'='.repeat(60)}`);
-      console.log(`OTP CONSOLE OUTPUT`);
-      console.log(`${'='.repeat(60)}`);
+      
+      console.log(`OTP CONSOLE OUTPUT\n`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`OTP Code: ${otp}`);
       console.log(`Expires in: 5 minutes`);
       console.log(`${'='.repeat(60)}\n`);
 
-      // Save new OTP to database
+      // lưu OTP mới vào cơ sở dữ liệu
       const savedOtp = await this.otpRepo.save({
         phoneNumber,
         code: otp,
@@ -247,6 +244,14 @@ export class AuthService {
 
   async completeRegister(data: CompleteRegisterDto) {
     try {
+      console.log('[AuthService.completeRegister] Received data:', data);
+      console.log('[AuthService.completeRegister] Field check:', {
+        phoneNumber: data.phoneNumber,
+        password: data.password,
+        fullName: data.fullName,
+        birthDate: data.birthDate,
+      });
+
       // Validate required fields
       if (
         !data.phoneNumber ||
@@ -280,13 +285,15 @@ export class AuthService {
       // Hash password
       const hash = await bcrypt.hash(data.password, 10);
 
+      const birthDate = new Date(data.birthDate);
+
       // Create and save user
 
       const user = this.userRepo.create({
         phoneNumber: data.phoneNumber,
         passwordHash: hash,
         fullName: data.fullName,
-        birthDate: data.birthDate,
+        birthDate: birthDate,
         gender: data.gender,
       });
 
@@ -319,14 +326,16 @@ export class AuthService {
     }
   }
 
-  async login(phoneNumber: string, password: string) {
+  async login(phoneNumber: string, password: string, platform?: string) {
     try {
       // Validate input
       if (!phoneNumber || !password) {
         throw new BadRequestException('Số điện thoại và mật khẩu là bắt buộc');
       }
 
-      this.logger.log(`🔐 Login attempt for: ${phoneNumber}`);
+      this.logger.log(
+        `Login attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
 
       // Find user by phone number
 
@@ -344,7 +353,7 @@ export class AuthService {
       const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
       if (!isPasswordValid) {
-        this.logger.warn(`⚠ Invalid password for user: ${phoneNumber}`);
+        this.logger.warn(`Invalid password for user: ${phoneNumber}`);
         throw new BadRequestException('Số điện thoại hoặc mật khẩu sai');
       }
 
@@ -353,11 +362,33 @@ export class AuthService {
       // Generate JWT token
       const token = this.generateJwtToken(phoneNumber);
 
-      // Single Session Login: Save token to database and invalidate old session
+      // quản lý phiên đăng nhập
+      const now = new Date();
 
-      user.currentSessionToken = token;
-      user.lastLoginAt = new Date();
-      // Session Timeout: Initialize activity timestamp
+      if (platform === 'mobile') {
+        // Mobile: chỉ vô hiệu hóa phiên mobile cũ
+
+        user.mobileSessionToken = token;
+        user.mobileSessionStartedAt = now;
+        user.mobileLastActivityAt = Date.now();
+      } else if (platform === 'web') {
+        // Web: chỉ vô hiệu hóa phiên web cũ
+
+        user.webSessionToken = token;
+        user.webSessionStartedAt = now;
+        user.webLastActivityAt = Date.now();
+      } else {
+        // mặc định: coi như web để tương thích ngược
+
+        user.webSessionToken = token;
+        user.webSessionStartedAt = now;
+        user.webLastActivityAt = Date.now();
+        // Giữ lại currentSessionToken cũ để tương thích ngược
+
+        user.currentSessionToken = token;
+      }
+
+      user.lastLoginAt = now;
       user.lastActivityAt = Date.now();
       await this.userRepo.save(user);
 
@@ -366,12 +397,12 @@ export class AuthService {
       console.log(`${'='.repeat(60)}`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`Full Name: ${user.fullName}`);
+      console.log(`Platform: ${platform || 'web'}`);
       console.log(`Token: ${token.substring(0, 50)}...`);
       console.log(`Login Time: ${new Date().toISOString()}`);
       console.log(`${'='.repeat(60)}\n`);
 
-      // Return user data with JWT token
-
+      // trả về dữ liệu người dùng với token JWT
       return {
         success: true,
         message: 'Đăng nhập thành công',
@@ -404,9 +435,11 @@ export class AuthService {
     }
   }
 
-  async logout(phoneNumber: string) {
+  async logout(phoneNumber: string, platform?: string) {
     try {
-      this.logger.log(`🚪 Logout attempt for: ${phoneNumber}`);
+      this.logger.log(
+        `Logout attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
 
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
@@ -416,12 +449,30 @@ export class AuthService {
         throw new BadRequestException('Người dùng không tồn tại');
       }
 
-      // Clear session token
+      // xóa session theo nền tảng
+      if (platform === 'mobile') {
+        user.mobileSessionToken = null as unknown as string;
+        user.mobileSessionStartedAt = null as unknown as Date;
+        user.mobileLastActivityAt = null as unknown as number;
+      } else if (platform === 'web') {
+        user.webSessionToken = null as unknown as string;
+        user.webSessionStartedAt = null as unknown as Date;
+        user.webLastActivityAt = null as unknown as number;
+      } else {
 
-      user.currentSessionToken = null as unknown as string;
+        // Default: xóa tất cả session
+        user.webSessionToken = null as unknown as string;
+        user.mobileSessionToken = null as unknown as string;
+        user.webSessionStartedAt = null as unknown as Date;
+        user.mobileSessionStartedAt = null as unknown as Date;
+        user.currentSessionToken = null as unknown as string;
+      }
+
       await this.userRepo.save(user);
 
-      this.logger.log(`✓ Logout successful for: ${phoneNumber}`);
+      this.logger.log(
+        `✓ Logout successful for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
 
       return {
         success: true,
@@ -437,6 +488,152 @@ export class AuthService {
         ? error
         : new BadRequestException(
             error.message || 'Lỗi đăng xuất. Vui lòng thử lại.',
+          );
+    }
+  }
+
+// xác minh OTP quên mật khẩu
+  async verifyOtpForgetPassword(phoneNumber: string, otp: string) {
+    try {
+      // Validate inputs
+      if (!phoneNumber || phoneNumber.length < 10) {
+        throw new BadRequestException('Số điện thoại không hợp lệ');
+      }
+
+      if (!otp || otp.length !== 6) {
+        throw new BadRequestException('OTP phải có 6 chữ số');
+      }
+
+      // Check if user exists
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Số điện thoại không tồn tại');
+      }
+
+      // Find and validate OTP
+      const otpRecord = await this.otpRepo.findOne({
+        where: { phoneNumber, code: otp },
+      });
+
+      if (!otpRecord) {
+        throw new BadRequestException('OTP không đúng');
+      }
+
+      // kiểm tra thời gian hết hạn
+      if (new Date() > otpRecord.expiresAt) {
+        await this.otpRepo.delete({ id: otpRecord.id });
+        throw new BadRequestException(
+          'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
+        );
+      }
+
+      // Đánh dấu OTP là đã xác minh
+      otpRecord.verified = true;
+      await this.otpRepo.save(otpRecord);
+
+      return {
+        success: true,
+        message: 'OTP xác minh thành công',
+        data: {
+          phoneNumber,
+          otpId: otpRecord.id,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error verifying OTP for forget password:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
+          );
+    }
+  }
+
+  async resetPassword(data: {
+    phoneNumber: string;
+    otp: string;
+    newPassword: string;
+    confirmPassword: string;
+  }) {
+    try {
+      // Validate inputs
+      if (!data.phoneNumber || data.phoneNumber.length < 10) {
+        throw new BadRequestException('Số điện thoại không hợp lệ');
+      }
+
+      if (!data.otp || data.otp.length !== 6) {
+        throw new BadRequestException('OTP phải có 6 chữ số');
+      }
+
+      if (!data.newPassword || data.newPassword.length < 8) {
+        throw new BadRequestException('Mật khẩu phải có ít nhất 8 ký tự');
+      }
+
+      if (data.newPassword !== data.confirmPassword) {
+        throw new BadRequestException('Mật khẩu xác nhận không khớp');
+      }
+
+      // kiểm tra người dùng đã tồn tại
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber: data.phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Số điện thoại không tồn tại');
+      }
+
+      // Verify OTP
+      const otpRecord = await this.otpRepo.findOne({
+        where: { phoneNumber: data.phoneNumber, code: data.otp },
+      });
+
+      if (!otpRecord) {
+        throw new BadRequestException('OTP không đúng');
+      }
+
+      // kiểm tra thời gian hết hạn
+      if (new Date() > otpRecord.expiresAt) {
+        await this.otpRepo.delete({ id: otpRecord.id });
+        throw new BadRequestException(
+          'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
+        );
+      }
+
+      // kiểm tra OTP đã được xác minh
+      if (!otpRecord.verified) {
+        throw new BadRequestException('OTP chưa được xác minh');
+      }
+
+      // mã hóa mật khẩu mới
+      const passwordHash = await bcrypt.hash(data.newPassword, 10);
+
+      // cập nhật mật khẩu người dùng
+      user.passwordHash = passwordHash;
+      await this.userRepo.save(user);
+
+      // xóa OTP đã sử dụng
+      await this.otpRepo.delete({ id: otpRecord.id });
+
+      this.logger.log(`✓ Password reset successful for: ${data.phoneNumber}`);
+
+      return {
+        success: true,
+        message: 'Mật khẩu đã được thay đổi thành công',
+        data: {
+          phoneNumber: data.phoneNumber,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error resetting password:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi đặt lại mật khẩu. Vui lòng thử lại.',
           );
     }
   }

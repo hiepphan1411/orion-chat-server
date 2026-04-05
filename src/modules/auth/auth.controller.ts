@@ -12,6 +12,8 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CompleteRegisterDto } from './dto/complete-register.dto';
 import { LoginDto } from './dto/login.dto';
 import { SendOTPForgetPasswordDto } from './dto/send-otp-forget-password.dto';
+import { VerifyOtpForgetPasswordDto } from './dto/verify-otp-forget-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtSessionGuard } from './guards/jwt-session.guard';
 
 @Controller('auth')
@@ -28,6 +30,16 @@ export class AuthController {
     return this.authService.sendOtpForgetPassword(body.phoneNumber);
   }
 
+  @Post('verify-otp-forget-password')
+  verifyOtpForgetPassword(@Body() body: VerifyOtpForgetPasswordDto) {
+    return this.authService.verifyOtpForgetPassword(body.phoneNumber, body.otp);
+  }
+
+  @Post('reset-password')
+  resetPassword(@Body() body: ResetPasswordDto) {
+    return this.authService.resetPassword(body);
+  }
+
   @Post('verify-otp')
   verifyOtp(@Body() body: VerifyOtpDto) {
     return this.authService.verifyOtp(body.phoneNumber, body.otp);
@@ -40,13 +52,20 @@ export class AuthController {
 
   @Post('login')
   login(@Body() body: LoginDto) {
-    return this.authService.login(body.phoneNumber, body.password);
+    return this.authService.login(
+      body.phoneNumber,
+      body.password,
+      body.platform,
+    );
   }
 
   @Post('logout')
   @UseGuards(JwtSessionGuard)
-  logout(@Request() req: { user: { phoneNumber: string } }) {
-    return this.authService.logout(req.user.phoneNumber);
+  logout(
+    @Request() req: { user: { phoneNumber: string } },
+    @Body() body?: { platform?: string },
+  ) {
+    return this.authService.logout(req.user.phoneNumber, body?.platform);
   }
 
   @Get('verify-token')
