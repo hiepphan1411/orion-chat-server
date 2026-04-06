@@ -73,6 +73,14 @@ import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
 import { UsersModule } from './modules/users/users.module';
+import { UserSettingsModule } from './modules/user-settings/user-settings.module';
+import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
+import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
+import { UserDevicesModule } from './modules/user-devices/user-devices.module';
+import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
+import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
+import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
+import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
 
 @Module({
   imports: [
@@ -124,6 +132,10 @@ import { UsersModule } from './modules/users/users.module';
         Sprint,
         Epic,
         Milestone,
+        UserSettings,
+        NotificationSettings,
+        PrivacySettings,
+        UserDevices,
       ],
       autoLoadEntities: true,
       synchronize: true,
@@ -175,6 +187,10 @@ import { UsersModule } from './modules/users/users.module';
     SprintModule,
     EpicModule,
     MilestoneModule,
+    UserSettingsModule,
+    NotificationSettingsModule,
+    PrivacySettingsModule,
+    UserDevicesModule,
   ],
 })
 export class AppModule {}

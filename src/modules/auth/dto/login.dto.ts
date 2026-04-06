@@ -10,7 +10,35 @@ export class LoginDto {
   @MinLength(8)
   password: string;
 
-  @IsString()
   @IsOptional()
-  platform?: string; // 'web' || 'mobile'
+  @IsString()
+  deviceName?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceType?: string;
+
+  @IsOptional()
+  @IsString()
+  deviceModel?: string;
+
+  @IsOptional()
+  @IsString()
+  osType?: string;
+
+  @IsOptional()
+  @IsString()
+  osVersion?: string;
+
+  @IsOptional()
+  @IsString()
+  appVersion?: string;
+
+  @IsOptional()
+  @IsString()
+  fcmToken?: string;
+
+  @IsOptional()
+  @IsString()
+  ipAddress?: string;
 }

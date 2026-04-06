@@ -6,10 +6,12 @@ import { AuthController } from './auth.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Otp } from './entities/otp.entity';
 import { User } from '../users/entities/user.entity';
+import { UserDevicesModule } from '../user-devices/user-devices.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Otp, User]),
+    UserDevicesModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
