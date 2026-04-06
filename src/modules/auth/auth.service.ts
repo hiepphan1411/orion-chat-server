@@ -55,14 +55,16 @@ export class AuthService {
     refreshToken: string,
     devicePayload?: LoginDevicePayload,
   ): Promise<void> {
+    const browserFromName = devicePayload?.deviceName?.split(' on ')[0]?.trim();
+
     const createDeviceDto: CreateUserDevicesDto = {
       userId,
       deviceName: devicePayload?.deviceName || 'Unknown Device',
-      deviceType: devicePayload?.deviceType || 'unknown',
-      deviceModel: devicePayload?.deviceModel || 'unknown',
-      osType: devicePayload?.osType || 'unknown',
-      osVersion: devicePayload?.osVersion || 'unknown',
-      appVersion: devicePayload?.appVersion || 'unknown',
+      deviceType: devicePayload?.deviceType || 'web',
+      deviceModel: devicePayload?.deviceModel || browserFromName || 'Web Browser',
+      osType: devicePayload?.osType || 'Unknown OS',
+      osVersion: devicePayload?.osVersion || '',
+      appVersion: devicePayload?.appVersion || 'web',
       refreshToken,
       fcmToken: devicePayload?.fcmToken || '',
       ipAddress: devicePayload?.ipAddress || '',
@@ -375,6 +377,8 @@ export class AuthService {
       if (!phoneNumber || !password) {
         throw new BadRequestException('Số điện thoại và mật khẩu là bắt buộc');
       }
+
+      const platform = (devicePayload?.deviceType || 'web').toLowerCase();
 
       this.logger.log(
         `Login attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,

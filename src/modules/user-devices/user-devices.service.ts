@@ -11,6 +11,48 @@ import {
 export class UserDevicesService {
   private readonly logger = new Logger(UserDevicesService.name);
 
+  private normalizeValue(value?: string | null): string {
+    return (value || '').trim().toLowerCase();
+  }
+
+  private isUnknownValue(value?: string | null): boolean {
+    const normalized = this.normalizeValue(value);
+    return (
+      !normalized ||
+      normalized === 'unknown' ||
+      normalized === 'unknown os' ||
+      normalized === 'unknown device' ||
+      normalized === 'web browser' ||
+      normalized === 'n/a'
+    );
+  }
+
+  private valueMatches(existing?: string | null, incoming?: string | null): boolean {
+    const normalizedExisting = this.normalizeValue(existing);
+    const normalizedIncoming = this.normalizeValue(incoming);
+
+    if (this.isUnknownValue(normalizedExisting) || this.isUnknownValue(normalizedIncoming)) {
+      return true;
+    }
+
+    return normalizedExisting === normalizedIncoming;
+  }
+
+  private extractBrowser(deviceName?: string | null, deviceModel?: string | null): string {
+    if (!this.isUnknownValue(deviceModel)) {
+      return this.normalizeValue(deviceModel);
+    }
+
+    const name = this.normalizeValue(deviceName);
+    if (!name) return '';
+    const [browserPart] = name.split(' on ');
+    return browserPart?.trim() || '';
+  }
+
+  private getPreferredValue(existing?: string | null, incoming?: string | null): string {
+    return this.isUnknownValue(incoming) ? existing || '' : incoming || '';
+  }
+
   constructor(
     @InjectRepository(UserDevices)
     private devicesRepository: Repository<UserDevices>,
@@ -37,24 +79,56 @@ export class UserDevicesService {
       order: { createdAt: 'DESC' },
     });
 
-    const matchedDevice = userDevices.find(
-      (device) =>
-        device.deviceName === createDto.deviceName &&
-        device.deviceType === createDto.deviceType &&
-        (device.deviceModel || '') === (createDto.deviceModel || '') &&
-        (device.osType || '') === (createDto.osType || '') &&
-        (device.osVersion || '') === (createDto.osVersion || ''),
+    const incomingBrowser = this.extractBrowser(
+      createDto.deviceName,
+      createDto.deviceModel,
     );
+
+    const matchedDevice = userDevices.find((device) => {
+      const existingBrowser = this.extractBrowser(
+        device.deviceName,
+        device.deviceModel,
+      );
+
+      return (
+        this.valueMatches(existingBrowser, incomingBrowser) &&
+        this.valueMatches(device.osType, createDto.osType) &&
+        this.valueMatches(device.deviceType, createDto.deviceType)
+      );
+    });
 
     if (!matchedDevice) {
       return this.create(createDto);
     }
 
+    const nextDeviceModel = this.getPreferredValue(
+      matchedDevice.deviceModel,
+      createDto.deviceModel,
+    );
+    const nextOsType = this.getPreferredValue(matchedDevice.osType, createDto.osType);
+    const nextOsVersion = this.getPreferredValue(
+      matchedDevice.osVersion,
+      createDto.osVersion,
+    );
+    const nextDeviceType = this.getPreferredValue(
+      matchedDevice.deviceType,
+      createDto.deviceType,
+    );
+    const nextBrowser = this.extractBrowser(createDto.deviceName, nextDeviceModel) ||
+      this.extractBrowser(matchedDevice.deviceName, matchedDevice.deviceModel) ||
+      'Unknown Device';
+    const nextDeviceName = `${nextBrowser} on ${nextOsType || 'Unknown OS'}`;
+
     Object.assign(matchedDevice, {
-      appVersion: createDto.appVersion,
+      deviceName: nextDeviceName,
+      deviceType: nextDeviceType,
+      deviceModel: nextDeviceModel,
+      osType: nextOsType,
+      osVersion: nextOsVersion,
+      appVersion: this.getPreferredValue(matchedDevice.appVersion, createDto.appVersion),
       refreshToken: createDto.refreshToken,
-      fcmToken: createDto.fcmToken,
-      ipAddress: createDto.ipAddress,
+      fcmToken: this.getPreferredValue(matchedDevice.fcmToken, createDto.fcmToken),
+      ipAddress: this.getPreferredValue(matchedDevice.ipAddress, createDto.ipAddress),
       isActive: true,
       lastLogin: new Date(),
     });
