@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { UserDevicesService } from './user-devices.service';
 import {
@@ -19,6 +20,8 @@ import type { CurrentUserPayload } from 'src/common/decorators/current-user.deco
 
 @Controller('user-devices')
 export class UserDevicesController {
+  //private readonly logger = new Logger(UserDevicesController.name);
+
   constructor(private readonly service: UserDevicesService) {}
 
   @Post()
@@ -27,18 +30,19 @@ export class UserDevicesController {
     return this.service.create(createDto);
   }
 
-  // PUT SPECIFIC ROUTES (me/*) BEFORE PARAMETERIZED ROUTES (:id)
   @Get('me/devices')
   @UseGuards(JwtAuthGuard)
-  getMyDevices(@CurrentUser() user: CurrentUserPayload) {
-    console.log('[UserDevicesController] Getting devices for user:', user.userId);
-    return this.service.findByUserId(user.userId);
+  async getMyDevices(@CurrentUser() user: CurrentUserPayload) {
+    if (!user || !user.userId) {
+      return [];
+    }
+    const devices = await this.service.findByUserId(user.userId);
+    return devices;
   }
 
   @Get('me/active-devices')
   @UseGuards(JwtAuthGuard)
   getMyActiveDevices(@CurrentUser() user: CurrentUserPayload) {
-    console.log('[UserDevicesController] Getting active devices for user:', user.userId);
     return this.service.getActiveDevices(user.userId);
   }
 
@@ -48,7 +52,6 @@ export class UserDevicesController {
     return this.service.findByUserId(userId);
   }
 
-  // GENERIC ROUTES WITH PARAMETERS AFTER SPECIFIC ROUTES
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   findById(@Param('id') id: string) {

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserDevices } from './entities/user-devices.entity';
@@ -9,6 +9,8 @@ import {
 
 @Injectable()
 export class UserDevicesService {
+  private readonly logger = new Logger(UserDevicesService.name);
+
   constructor(
     @InjectRepository(UserDevices)
     private devicesRepository: Repository<UserDevices>,
@@ -18,18 +20,58 @@ export class UserDevicesService {
     const device = this.devicesRepository.create(createDto);
     const saved = await this.devicesRepository.save(device);
     await this.devicesRepository.update(saved.id, { lastLogin: new Date() });
-    const result = await this.devicesRepository.findOne({ where: { id: saved.id } });
+    const result = await this.devicesRepository.findOne({
+      where: { id: saved.id },
+    });
     if (!result) {
       throw new NotFoundException('Failed to retrieve created device');
     }
     return result;
   }
 
+  async createOrUpdateFromLogin(
+    createDto: CreateUserDevicesDto,
+  ): Promise<UserDevices> {
+    const userDevices = await this.devicesRepository.find({
+      where: { userId: createDto.userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const matchedDevice = userDevices.find(
+      (device) =>
+        device.deviceName === createDto.deviceName &&
+        device.deviceType === createDto.deviceType &&
+        (device.deviceModel || '') === (createDto.deviceModel || '') &&
+        (device.osType || '') === (createDto.osType || '') &&
+        (device.osVersion || '') === (createDto.osVersion || ''),
+    );
+
+    if (!matchedDevice) {
+      return this.create(createDto);
+    }
+
+    Object.assign(matchedDevice, {
+      appVersion: createDto.appVersion,
+      refreshToken: createDto.refreshToken,
+      fcmToken: createDto.fcmToken,
+      ipAddress: createDto.ipAddress,
+      isActive: true,
+      lastLogin: new Date(),
+    });
+
+    return this.devicesRepository.save(matchedDevice);
+  }
+
   async findByUserId(userId: string): Promise<UserDevices[]> {
-    return await this.devicesRepository.find({
+    const devices = await this.devicesRepository.find({
       where: { userId },
       order: { lastLogin: 'DESC' },
     });
+    this.logger.log(
+      `[UserDevicesService] Found ${devices.length} devices:`,
+      JSON.stringify(devices),
+    );
+    return devices;
   }
 
   async findById(id: string): Promise<UserDevices> {

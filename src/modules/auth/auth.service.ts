@@ -9,6 +9,22 @@ import axios from 'axios';
 import bcrypt from 'bcrypt';
 import { User } from '../users/entities/user.entity';
 import { CompleteRegisterDto } from './dto/complete-register.dto';
+import { UserDevicesService } from '../user-devices/user-devices.service';
+import { CreateUserDevicesDto } from '../user-devices/dto/user-devices.dto';
+
+type LoginDevicePayload = Partial<
+  Pick<
+    CreateUserDevicesDto,
+    | 'deviceName'
+    | 'deviceType'
+    | 'deviceModel'
+    | 'osType'
+    | 'osVersion'
+    | 'appVersion'
+    | 'fcmToken'
+    | 'ipAddress'
+  >
+>;
 
 @Injectable()
 export class AuthService {
@@ -24,12 +40,35 @@ export class AuthService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
 
+    private userDevicesService: UserDevicesService,
+
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {
     this.esmsApiKey = this.configService.get('ESMS_API_KEY') || '';
     this.esmsSecretKey = this.configService.get('ESMS_SECRET_KEY') || '';
     this.esmsBaseUrl = 'https://rest.esms.vn/MainService.svc/json';
+  }
+
+  private async syncDeviceOnLogin(
+    userId: string,
+    refreshToken: string,
+    devicePayload?: LoginDevicePayload,
+  ): Promise<void> {
+    const createDeviceDto: CreateUserDevicesDto = {
+      userId,
+      deviceName: devicePayload?.deviceName || 'Unknown Device',
+      deviceType: devicePayload?.deviceType || 'unknown',
+      deviceModel: devicePayload?.deviceModel || 'unknown',
+      osType: devicePayload?.osType || 'unknown',
+      osVersion: devicePayload?.osVersion || 'unknown',
+      appVersion: devicePayload?.appVersion || 'unknown',
+      refreshToken,
+      fcmToken: devicePayload?.fcmToken || '',
+      ipAddress: devicePayload?.ipAddress || '',
+    };
+
+    await this.userDevicesService.createOrUpdateFromLogin(createDeviceDto);
   }
 
   generateOtp(): string {
@@ -319,7 +358,11 @@ export class AuthService {
     }
   }
 
-  async login(phoneNumber: string, password: string) {
+  async login(
+    phoneNumber: string,
+    password: string,
+    devicePayload?: LoginDevicePayload,
+  ) {
     try {
       // Validate input
       if (!phoneNumber || !password) {
@@ -360,6 +403,16 @@ export class AuthService {
       // Session Timeout: Initialize activity timestamp
       user.lastActivityAt = Date.now();
       await this.userRepo.save(user);
+
+      try {
+        await this.syncDeviceOnLogin(user.userId, token, devicePayload);
+      } catch (deviceError) {
+        this.logger.warn(
+          `Failed to sync login device for user ${user.userId}: ${
+            deviceError instanceof Error ? deviceError.message : deviceError
+          }`,
+        );
+      }
 
       console.log(`\n${'='.repeat(60)}`);
       console.log(`LOGIN SUCCESSFUL`);

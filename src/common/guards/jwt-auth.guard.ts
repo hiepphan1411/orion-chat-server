@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +29,8 @@ interface AuthenticatedRequest extends Request {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(
     private configService: ConfigService,
 
@@ -44,12 +47,10 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     try {
-      // Verify JWT token using manual crypto (matches auth.service generation)
       const secret =
         this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
       const payload = this.verifyToken(token, secret);
 
-      // Kiểm tra user tồn tại bằng phoneNumber
       const user = await this.userRepository.findOne({
         where: { phoneNumber: payload.phoneNumber },
       });
@@ -58,7 +59,6 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('User not found');
       }
 
-      // Attach user vào request
       request.user = {
         userId: user.userId,
         phoneNumber: user.phoneNumber,
