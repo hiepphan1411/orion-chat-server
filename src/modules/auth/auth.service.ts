@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -8,6 +9,22 @@ import axios from 'axios';
 import bcrypt from 'bcrypt';
 import { User } from '../users/entities/user.entity';
 import { CompleteRegisterDto } from './dto/complete-register.dto';
+import { UserDevicesService } from '../user-devices/user-devices.service';
+import { CreateUserDevicesDto } from '../user-devices/dto/user-devices.dto';
+
+type LoginDevicePayload = Partial<
+  Pick<
+    CreateUserDevicesDto,
+    | 'deviceName'
+    | 'deviceType'
+    | 'deviceModel'
+    | 'osType'
+    | 'osVersion'
+    | 'appVersion'
+    | 'fcmToken'
+    | 'ipAddress'
+  >
+>;
 
 @Injectable()
 export class AuthService {
@@ -23,6 +40,9 @@ export class AuthService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
 
+    private userDevicesService: UserDevicesService,
+
+    private jwtService: JwtService,
     private configService: ConfigService,
   ) {
     this.esmsApiKey = this.configService.get('ESMS_API_KEY') || '';
@@ -30,58 +50,40 @@ export class AuthService {
     this.esmsBaseUrl = 'https://rest.esms.vn/MainService.svc/json';
   }
 
+  private async syncDeviceOnLogin(
+    userId: string,
+    refreshToken: string,
+    devicePayload?: LoginDevicePayload,
+  ): Promise<void> {
+    const browserFromName = devicePayload?.deviceName?.split(' on ')[0]?.trim();
+
+    const createDeviceDto: CreateUserDevicesDto = {
+      userId,
+      deviceName: devicePayload?.deviceName || 'Unknown Device',
+      deviceType: devicePayload?.deviceType || 'web',
+      deviceModel: devicePayload?.deviceModel || browserFromName || 'Web Browser',
+      osType: devicePayload?.osType || 'Unknown OS',
+      osVersion: devicePayload?.osVersion || '',
+      appVersion: devicePayload?.appVersion || 'web',
+      refreshToken,
+      fcmToken: devicePayload?.fcmToken || '',
+      ipAddress: devicePayload?.ipAddress || '',
+    };
+
+    await this.userDevicesService.createOrUpdateFromLogin(createDeviceDto);
+  }
+
   generateOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private generateJwtToken(phoneNumber: string, userId: string): string {
-    const jwtSecret = this.configService.get('JWT_SECRET') || 'your-secret-key';
-    const jwtExpiresIn = this.configService.get('JWT_EXPIRES_IN') || '24h';
-
-    const header = Buffer.from(
-      JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
-    ).toString('base64');
-    const payload = Buffer.from(
-      JSON.stringify({
-        phoneNumber,
-        userId,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + this.parseExpiry(jwtExpiresIn),
-      }),
-    ).toString('base64');
-
-    const crypto = require('crypto');
-    const signature = crypto
-      .createHmac('sha256', jwtSecret)
-      .update(`${header}.${payload}`)
-      .digest('base64');
-
-    return `${header}.${payload}.${signature}`;
-  }
-
-  private parseExpiry(expiresIn: string): number {
-    const match = expiresIn.match(/^(\d+)([a-z]+)$/);
-    if (!match) return 86400; // default 24h
-
-    const value = parseInt(match[1]);
-    const unit = match[2];
-
-    switch (unit) {
-      case 's':
-        return value;
-      case 'm':
-        return value * 60;
-      case 'h':
-        return value * 3600;
-      case 'd':
-        return value * 86400;
-      default:
-        return 86400;
-    }
+  private generateJwtToken(phoneNumber: string): string {
+    return this.jwtService.sign({ phoneNumber });
   }
 
   async sendOtp(phoneNumber: string) {
     try {
+      // Validate phone number
       if (!phoneNumber || phoneNumber.length < 10) {
         throw new BadRequestException('Số điện thoại không hợp lệ');
       }
@@ -93,10 +95,12 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại đã tồn tại');
       }
 
+      // Delete old OTP for this phone number
       await this.otpRepo.delete({ phoneNumber });
 
       const otp = this.generateOtp();
 
+      // Log to console in development
       console.log(`\n${'='.repeat(60)}`);
       console.log(`OTP CONSOLE OUTPUT`);
       console.log(`${'='.repeat(60)}`);
@@ -145,21 +149,18 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại không tồn tại');
       }
 
-      // Delete old OTP for this phone number
+      // xóa OTP cũ cho số điện thoại này
       await this.otpRepo.delete({ phoneNumber });
 
       const otp = this.generateOtp();
 
-      // Log to console in development
-      console.log(`\n${'='.repeat(60)}`);
-      console.log(`OTP CONSOLE OUTPUT`);
-      console.log(`${'='.repeat(60)}`);
+      console.log(`OTP CONSOLE OUTPUT\n`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`OTP Code: ${otp}`);
       console.log(`Expires in: 5 minutes`);
       console.log(`${'='.repeat(60)}\n`);
 
-      // Save new OTP to database
+      // lưu OTP mới vào cơ sở dữ liệu
       const savedOtp = await this.otpRepo.save({
         phoneNumber,
         code: otp,
@@ -193,6 +194,7 @@ export class AuthService {
   ): Promise<void> {
     try {
       // Validate eSMS credentials
+
       if (!this.esmsApiKey || !this.esmsSecretKey) {
         this.logger.warn(
           'eSMS credentials not configured. OTP saved to DB but SMS not sent.',
@@ -222,7 +224,7 @@ export class AuthService {
 
       // Check if eSMS API returned success (CodeResult: "100")
       if (response?.data?.CodeResult === '100') {
-        this.logger.log(`✓ OTP successfully sent to ${phoneNumber}`);
+        this.logger.log(`OTP successfully sent to ${phoneNumber}`);
       } else {
         this.logger.warn(
           `⚠ eSMS response code: ${response?.data?.CodeResult}, message: ${response?.data?.ErrorMessage}`,
@@ -254,6 +256,7 @@ export class AuthService {
       }
 
       // Check if OTP has expired
+
       if (record.expiresAt < new Date()) {
         throw new BadRequestException('OTP đã hết hạn');
       }
@@ -282,6 +285,14 @@ export class AuthService {
 
   async completeRegister(data: CompleteRegisterDto) {
     try {
+      console.log('[AuthService.completeRegister] Received data:', data);
+      console.log('[AuthService.completeRegister] Field check:', {
+        phoneNumber: data.phoneNumber,
+        password: data.password,
+        fullName: data.fullName,
+        birthDate: data.birthDate,
+      });
+
       // Validate required fields
       if (
         !data.phoneNumber ||
@@ -295,6 +306,7 @@ export class AuthService {
       }
 
       // Check if phone number already exists
+
       const existingUser = await this.userRepo.findOne({
         where: { phoneNumber: data.phoneNumber },
       });
@@ -306,6 +318,7 @@ export class AuthService {
       }
 
       // Validate password strength
+
       if (data.password.length < 8) {
         throw new BadRequestException('Mật khẩu phải có ít nhất 8 ký tự');
       }
@@ -313,18 +326,22 @@ export class AuthService {
       // Hash password
       const hash = await bcrypt.hash(data.password, 10);
 
+      const birthDate = new Date(data.birthDate);
+
       // Create and save user
+
       const user = this.userRepo.create({
         phoneNumber: data.phoneNumber,
         passwordHash: hash,
         fullName: data.fullName,
-        birthDate: data.birthDate,
+        birthDate: birthDate,
         gender: data.gender,
       });
 
       const savedUser = await this.userRepo.save(user);
 
       // Delete OTP after successful registration
+
       await this.otpRepo.delete({ phoneNumber: data.phoneNumber });
 
       this.logger.log(`User registered successfully: ${data.phoneNumber}`);
@@ -350,16 +367,25 @@ export class AuthService {
     }
   }
 
-  async login(phoneNumber: string, password: string) {
+  async login(
+    phoneNumber: string,
+    password: string,
+    devicePayload?: LoginDevicePayload,
+  ) {
     try {
       // Validate input
       if (!phoneNumber || !password) {
         throw new BadRequestException('Số điện thoại và mật khẩu là bắt buộc');
       }
 
-      this.logger.log(`🔐 Login attempt for: ${phoneNumber}`);
+      const platform = (devicePayload?.deviceType || 'web').toLowerCase();
+
+      this.logger.log(
+        `Login attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
 
       // Find user by phone number
+
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
       });
@@ -370,41 +396,89 @@ export class AuthService {
       }
 
       // Compare password
+
       const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
       if (!isPasswordValid) {
-        this.logger.warn(`⚠ Invalid password for user: ${phoneNumber}`);
+        this.logger.warn(`Invalid password for user: ${phoneNumber}`);
         throw new BadRequestException('Số điện thoại hoặc mật khẩu sai');
       }
 
       this.logger.log(`Login successful for: ${phoneNumber}`);
 
       // Generate JWT token
-      const token = this.generateJwtToken(phoneNumber, user.userId);
+      const token = this.generateJwtToken(phoneNumber);
 
-      // Log to console in development
+      // quản lý phiên đăng nhập
+      const now = new Date();
+
+      if (platform === 'mobile') {
+        // Mobile: chỉ vô hiệu hóa phiên mobile cũ
+
+        user.mobileSessionToken = token;
+        user.mobileSessionStartedAt = now;
+        user.mobileLastActivityAt = Date.now();
+      } else if (platform === 'web') {
+        // Web: chỉ vô hiệu hóa phiên web cũ
+
+        user.webSessionToken = token;
+        user.webSessionStartedAt = now;
+        user.webLastActivityAt = Date.now();
+      } else {
+        // mặc định: coi như web để tương thích ngược
+
+        user.webSessionToken = token;
+        user.webSessionStartedAt = now;
+        user.webLastActivityAt = Date.now();
+        // Giữ lại currentSessionToken cũ để tương thích ngược
+
+        user.currentSessionToken = token;
+      }
+
+      user.lastLoginAt = now;
+      user.lastActivityAt = Date.now();
+      await this.userRepo.save(user);
+
+      try {
+        await this.syncDeviceOnLogin(user.userId, token, devicePayload);
+      } catch (deviceError) {
+        this.logger.warn(
+          `Failed to sync login device for user ${user.userId}: ${
+            deviceError instanceof Error ? deviceError.message : deviceError
+          }`,
+        );
+      }
+
       console.log(`\n${'='.repeat(60)}`);
       console.log(`LOGIN SUCCESSFUL`);
       console.log(`${'='.repeat(60)}`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`Full Name: ${user.fullName}`);
+      console.log(`Platform: ${platform || 'web'}`);
       console.log(`Token: ${token.substring(0, 50)}...`);
       console.log(`Login Time: ${new Date().toISOString()}`);
       console.log(`${'='.repeat(60)}\n`);
 
-      // Return user data with JWT token
+      // trả về dữ liệu người dùng với token JWT
       return {
         success: true,
         message: 'Đăng nhập thành công',
         data: {
           token,
-          userId: user.userId,
           phoneNumber: user.phoneNumber,
           fullName: user.fullName,
           birthDate: user.birthDate,
           gender: user.gender,
-          avatarUrl: user.avatarUrl,
           loginTime: new Date().toISOString(),
+          userId: user.userId,
+          email: user.email,
+          avatarUrl: user.avatarUrl,
+          coverImage: user.coverImage,
+          isOnline: user.isOnline,
+          showOnlineStatus: user.showOnlineStatus,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+          lastLoginAt: user.lastLoginAt,
         },
         timestamp: new Date().toISOString(),
       };
@@ -414,6 +488,208 @@ export class AuthService {
         ? error
         : new BadRequestException(
             error.message || 'Lỗi đăng nhập. Vui lòng thử lại.',
+          );
+    }
+  }
+
+  async logout(phoneNumber: string, platform?: string) {
+    try {
+      this.logger.log(
+        `Logout attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
+
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Người dùng không tồn tại');
+      }
+
+      // xóa session theo nền tảng
+      if (platform === 'mobile') {
+        user.mobileSessionToken = null as unknown as string;
+        user.mobileSessionStartedAt = null as unknown as Date;
+        user.mobileLastActivityAt = null as unknown as number;
+      } else if (platform === 'web') {
+        user.webSessionToken = null as unknown as string;
+        user.webSessionStartedAt = null as unknown as Date;
+        user.webLastActivityAt = null as unknown as number;
+      } else {
+        // Default: xóa tất cả session
+        user.webSessionToken = null as unknown as string;
+        user.mobileSessionToken = null as unknown as string;
+        user.webSessionStartedAt = null as unknown as Date;
+        user.mobileSessionStartedAt = null as unknown as Date;
+        user.currentSessionToken = null as unknown as string;
+      }
+
+      await this.userRepo.save(user);
+
+      this.logger.log(
+        `✓ Logout successful for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+      );
+
+      return {
+        success: true,
+        message: 'Đăng xuất thành công',
+        data: {
+          phoneNumber: user.phoneNumber,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error during logout:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi đăng xuất. Vui lòng thử lại.',
+          );
+    }
+  }
+
+  // xác minh OTP quên mật khẩu
+  async verifyOtpForgetPassword(phoneNumber: string, otp: string) {
+    try {
+      // Validate inputs
+      if (!phoneNumber || phoneNumber.length < 10) {
+        throw new BadRequestException('Số điện thoại không hợp lệ');
+      }
+
+      if (!otp || otp.length !== 6) {
+        throw new BadRequestException('OTP phải có 6 chữ số');
+      }
+
+      // Check if user exists
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Số điện thoại không tồn tại');
+      }
+
+      // Find and validate OTP
+      const otpRecord = await this.otpRepo.findOne({
+        where: { phoneNumber, code: otp },
+      });
+
+      if (!otpRecord) {
+        throw new BadRequestException('OTP không đúng');
+      }
+
+      // kiểm tra thời gian hết hạn
+      if (new Date() > otpRecord.expiresAt) {
+        await this.otpRepo.delete({ id: otpRecord.id });
+        throw new BadRequestException(
+          'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
+        );
+      }
+
+      // Đánh dấu OTP là đã xác minh
+      otpRecord.verified = true;
+      await this.otpRepo.save(otpRecord);
+
+      return {
+        success: true,
+        message: 'OTP xác minh thành công',
+        data: {
+          phoneNumber,
+          otpId: otpRecord.id,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error verifying OTP for forget password:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
+          );
+    }
+  }
+
+  async resetPassword(data: {
+    phoneNumber: string;
+    otp: string;
+    newPassword: string;
+    confirmPassword: string;
+  }) {
+    try {
+      // Validate inputs
+      if (!data.phoneNumber || data.phoneNumber.length < 10) {
+        throw new BadRequestException('Số điện thoại không hợp lệ');
+      }
+
+      if (!data.otp || data.otp.length !== 6) {
+        throw new BadRequestException('OTP phải có 6 chữ số');
+      }
+
+      if (!data.newPassword || data.newPassword.length < 8) {
+        throw new BadRequestException('Mật khẩu phải có ít nhất 8 ký tự');
+      }
+
+      if (data.newPassword !== data.confirmPassword) {
+        throw new BadRequestException('Mật khẩu xác nhận không khớp');
+      }
+
+      // kiểm tra người dùng đã tồn tại
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber: data.phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Số điện thoại không tồn tại');
+      }
+
+      // Verify OTP
+      const otpRecord = await this.otpRepo.findOne({
+        where: { phoneNumber: data.phoneNumber, code: data.otp },
+      });
+
+      if (!otpRecord) {
+        throw new BadRequestException('OTP không đúng');
+      }
+
+      // kiểm tra thời gian hết hạn
+      if (new Date() > otpRecord.expiresAt) {
+        await this.otpRepo.delete({ id: otpRecord.id });
+        throw new BadRequestException(
+          'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
+        );
+      }
+
+      // kiểm tra OTP đã được xác minh
+      if (!otpRecord.verified) {
+        throw new BadRequestException('OTP chưa được xác minh');
+      }
+
+      // mã hóa mật khẩu mới
+      const passwordHash = await bcrypt.hash(data.newPassword, 10);
+
+      // cập nhật mật khẩu người dùng
+      user.passwordHash = passwordHash;
+      await this.userRepo.save(user);
+
+      // xóa OTP đã sử dụng
+      await this.otpRepo.delete({ id: otpRecord.id });
+
+      this.logger.log(`✓ Password reset successful for: ${data.phoneNumber}`);
+
+      return {
+        success: true,
+        message: 'Mật khẩu đã được thay đổi thành công',
+        data: {
+          phoneNumber: data.phoneNumber,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error resetting password:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            error.message || 'Lỗi đặt lại mật khẩu. Vui lòng thử lại.',
           );
     }
   }

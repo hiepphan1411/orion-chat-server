@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
@@ -44,7 +44,7 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from 'src/modules/conversation/entities/group-conversation.entity';
+import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -65,14 +65,22 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.schema';
+import { Conversation } from './modules/conversation/entities/conversation.entity';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
-import { ConversationModule } from './modules/conversation/conversation.module';
+import { UsersModule } from './modules/users/users.module';
+import { UserSettingsModule } from './modules/user-settings/user-settings.module';
+import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
+import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
+import { UserDevicesModule } from './modules/user-devices/user-devices.module';
+import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
+import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
+import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
+import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
 
 @Module({
   imports: [
@@ -124,19 +132,29 @@ import { ConversationModule } from './modules/conversation/conversation.module';
         Sprint,
         Epic,
         Milestone,
+        UserSettings,
+        NotificationSettings,
+        PrivacySettings,
+        UserDevices,
       ],
       autoLoadEntities: true,
       synchronize: true,
     }),
 
-    // MongoDB
-    MongooseModule.forRoot('mongodb://localhost:27017/orion_chat'),
+    // MongoDB - Using environment variable
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        uri:
+          configService.get<string>('MONGO_URI') ||
+          'mongodb://localhost:27017/orion_chat',
+      }),
+    }),
 
     // Common Module (provides JwtAuthGuard globally)
     CommonModule,
 
     // Modules
-
     AuthModule,
     TaskModule,
     PersonalNoteModule,
@@ -157,6 +175,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
     AttachmentModule,
     NotesModule,
     FriendRequestModule,
+    UsersModule,
     GroupInviteModule,
     FriendsModule,
     PresenceModule,
@@ -168,7 +187,10 @@ import { ConversationModule } from './modules/conversation/conversation.module';
     SprintModule,
     EpicModule,
     MilestoneModule,
-    ConversationModule,
+    UserSettingsModule,
+    NotificationSettingsModule,
+    PrivacySettingsModule,
+    UserDevicesModule,
   ],
 })
 export class AppModule {}

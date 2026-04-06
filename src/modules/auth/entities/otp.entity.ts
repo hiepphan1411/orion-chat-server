@@ -13,4 +13,7 @@ export class Otp {
 
   @Column()
   expiresAt: Date;
+
+  @Column({ default: false })
+  verified: boolean;
 }
