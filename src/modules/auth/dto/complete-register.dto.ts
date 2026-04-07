@@ -1,5 +1,4 @@
-import { IsString, IsNotEmpty } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsNotEmpty, IsDateString } from 'class-validator';
 
 export class CompleteRegisterDto {
   @IsString()
@@ -14,8 +13,9 @@ export class CompleteRegisterDto {
   @IsNotEmpty()
   fullName: string;
 
-  @Type(() => Date)
-  birthDate: Date;
+  @IsDateString()
+  @IsNotEmpty()
+  birthDate: string;
 
   @IsString()
   @IsNotEmpty()
