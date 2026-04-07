@@ -26,9 +26,11 @@ const activeCalls = new Map<string, { callerId: string; receiverId: string }>();
 
 @WebSocketGateway({
   cors: {
-    origin: '*', // trong production nên specify domain cụ thể
+    origin: '*',
   },
   namespace: '/call', // namespace riêng cho call
+  pingTimeout: 300000, // 5 minutes
+  pingInterval: 60000, // ping every 1 minute
 })
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -384,5 +386,4 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.error('Error toggling media:', error);
     }
   }
-
 }

@@ -9,10 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import type { Request } from 'express';
-import {
-  SESSION_TIMEOUT,
-  isSessionExpired,
-} from '../../../config/session.config';
 
 interface TokenPayload {
   phoneNumber: string;
@@ -40,10 +36,10 @@ export class JwtSessionGuard implements CanActivate {
     }
 
     try {
-      //trích xuất số điện thoại từ token
+      // Trích xuất số điện thoại từ token
       const phoneNumber = this.extractPhoneFromToken(token);
 
-      // Find user
+      // Tìm user
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
       });
@@ -52,95 +48,14 @@ export class JwtSessionGuard implements CanActivate {
         throw new UnauthorizedException('Người dùng không tồn tại');
       }
 
-      // kiểm tra trạng thái tài khoản
+      // Kiểm tra trạng thái tài khoản
       if (!user.isActive) {
         throw new UnauthorizedException('Tài khoản đã bị vô hiệu hóa');
       }
 
-      // xác định nền tảng
-      const userAgent = request.headers['user-agent'] || '';
-      const xPlatform = String(
-        request.headers['x-platform'] || '',
-      ).toLowerCase();
-
-      // Xác định nền tảng: mobile or web
-      // ưu tiên: Header > UserAgent > Default
-      let platform = 'web';
-
-      if (xPlatform === 'mobile') {
-        platform = 'mobile';
-      } else if (xPlatform === 'web') {
-        platform = 'web';
-      } else if (
-        userAgent.toLowerCase().includes('expo') ||
-        userAgent.toLowerCase().includes('react-native')
-      ) {
-        // check for mobile platform
-        platform = 'mobile';
-      }
-      // else default to 'web'
-
-      // xác thực phiên cho nền tảng
-      if (platform === 'mobile') {
-        // Check mobile session token
-        if (user.mobileSessionToken !== token) {
-          this.logger.warn(
-            `Giới hạn phiên ${phoneNumber} (mobile). Phát hiện lỗi không khớp mã. Người dùng đã đăng nhập ở nơi khác.`,
-          );
-          throw new UnauthorizedException(
-            'Phiên làm việc đã hết hạn. Bạn đã đăng nhập ở nơi khác.',
-          );
-        }
-
-        // kiểm tra thời gian phiên
-        if (
-          isSessionExpired(user.mobileLastActivityAt, SESSION_TIMEOUT.DEFAULT)
-        ) {
-          this.logger.warn(
-            `Giới hạn phiên ${phoneNumber} (mobile). Không có hoạt động trong hơn 15 phút.`,
-          );
-          user.mobileSessionToken = null as unknown as string;
-          await this.userRepo.save(user);
-
-          throw new UnauthorizedException(
-            'Phiên làm việc đã hết hạn do không hoạt động.',
-          );
-        }
-
-        // cập nhật thời gian hoạt động cuối
-        user.mobileLastActivityAt = Date.now();
-      } else {
-        // Web platform
-        // kiểm tra token phiên web
-        if (user.webSessionToken !== token) {
-          this.logger.warn(
-            `Giới hạn phiên ${phoneNumber} (web). Phát hiện lỗi không khớp mã. Người dùng đã đăng nhập ở nơi khác.`,
-          );
-          throw new UnauthorizedException(
-            'Phiên làm việc đã hết hạn. Bạn đã đăng nhập ở nơi khác.',
-          );
-        }
-
-        // kiểm tra thời gian phiên
-        if (isSessionExpired(user.webLastActivityAt, SESSION_TIMEOUT.DEFAULT)) {
-          this.logger.warn(
-            `Giới hạn phiên ${phoneNumber} (web). Không có hoạt động trong hơn 15 phút.`,
-          );
-          user.webSessionToken = null as unknown as string;
-          await this.userRepo.save(user);
-
-          throw new UnauthorizedException(
-            'Phiên làm việc đã hết hạn do không hoạt động.',
-          );
-        }
-
-        // cập nhật thời gian hoạt động cuối
-        user.webLastActivityAt = Date.now();
-      }
-
-      await this.userRepo.save(user);
-
-      // Gán thông tin người dùng vào yêu cầu
+      // Gán thông tin người dùng vào request
+      // JWT token validity sẽ được kiểm tra bởi @UseGuards(JwtAuthGuard)
+      // Logout sẽ chỉ xảy ra khi token hết hạn (exp claim)
       request.user = {
         phoneNumber: user.phoneNumber,
         userId: user.userId,
@@ -174,8 +89,14 @@ export class JwtSessionGuard implements CanActivate {
       const payload = JSON.parse(
         Buffer.from(parts[1], 'base64').toString('utf-8'),
       ) as TokenPayload;
+
+      if (!payload.phoneNumber) {
+        throw new Error('phoneNumber not found in token');
+      }
+
       return payload.phoneNumber;
-    } catch {
+    } catch (error) {
+      this.logger.error('Error extracting phone from token:', error);
       throw new UnauthorizedException('Token không hợp lệ');
     }
   }

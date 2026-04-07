@@ -61,7 +61,8 @@ export class AuthService {
       userId,
       deviceName: devicePayload?.deviceName || 'Unknown Device',
       deviceType: devicePayload?.deviceType || 'web',
-      deviceModel: devicePayload?.deviceModel || browserFromName || 'Web Browser',
+      deviceModel:
+        devicePayload?.deviceModel || browserFromName || 'Web Browser',
       osType: devicePayload?.osType || 'Unknown OS',
       osVersion: devicePayload?.osVersion || '',
       appVersion: devicePayload?.appVersion || 'web',
@@ -78,7 +79,12 @@ export class AuthService {
   }
 
   private generateJwtToken(phoneNumber: string): string {
-    return this.jwtService.sign({ phoneNumber });
+    return this.jwtService.sign(
+      { phoneNumber },
+      {
+        expiresIn: '24h', // ✅ Token valid for 24 hours
+      },
+    );
   }
 
   async sendOtp(phoneNumber: string) {

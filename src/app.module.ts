@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
@@ -44,7 +44,7 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from './modules/conversation/entities/group-conversation.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -65,7 +65,7 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { Conversation } from './modules/conversation/entities/conversation.schema';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
@@ -81,6 +81,7 @@ import { UserSettings } from './modules/user-settings/entities/user-settings.ent
 import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
 import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
 import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
+import { ConversationModule } from './modules/conversation/conversation.module';
 
 @Module({
   imports: [
@@ -163,6 +164,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
     TaskBoardModule,
     BoardColumnModule,
     LabelModule,
+    ConversationModule,
     SubTaskModule,
     CommentModule,
     ActivityLogModule,

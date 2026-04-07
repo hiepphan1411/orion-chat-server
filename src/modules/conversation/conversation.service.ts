@@ -10,10 +10,13 @@ import { Repository } from 'typeorm';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
+import { User } from '../users/entities/user.entity';
 
 type MessageDetail = {
   content?: string;
   senderBy?: string;
+  senderName?: string;
+  senderAvatar?: string;
   conversationId?: string;
   clientMessageId?: string;
   messageType?: string;
@@ -53,6 +56,8 @@ export class ConversationService {
   constructor(
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
   ) {}
@@ -353,6 +358,29 @@ export class ConversationService {
       deduped.push(item);
 
       if (deduped.length === pageSize) break;
+    }
+
+    // Populate sender user info (fullName, avatarUrl)
+    const senderPhoneNumbers = [
+      ...new Set(deduped.map((m) => m.senderBy).filter(Boolean)),
+    ] as string[];
+
+    if (senderPhoneNumbers.length > 0) {
+      const users = await this.userRepo.find({
+        where: senderPhoneNumbers.map((phoneNumber) => ({
+          phoneNumber,
+        })),
+      });
+
+      const userMap = new Map(users.map((u) => [u.phoneNumber, u]));
+
+      deduped.forEach((msg) => {
+        if (msg.senderBy && userMap.has(msg.senderBy)) {
+          const user = userMap.get(msg.senderBy)!;
+          msg.senderName = user.fullName;
+          msg.senderAvatar = user.avatarUrl;
+        }
+      });
     }
 
     return deduped;

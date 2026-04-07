@@ -1,7 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import {
   BadRequestException,
   Body,
@@ -10,15 +8,20 @@ import {
   Post,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { JwtPayload } from 'jsonwebtoken';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { S3UploadService } from 'src/common/services/s3-upload.service';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ChatGateway } from './chat.gateway';
 import { MessageService } from './message.service';
 
 @Controller('messages')
+@UseGuards(JwtAuthGuard)
 export class MessageController {
   constructor(
     private readonly messageService: MessageService,
@@ -33,10 +36,10 @@ export class MessageController {
 
   @Post()
   create(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       conversationId: string;
-      senderBy: string;
       content: string;
       messageType?: string;
       replyToMessageId?: string;
@@ -46,15 +49,30 @@ export class MessageController {
       fileSize?: number;
     },
   ) {
-    return this.messageService.createMessage(body);
+    if (!body?.conversationId)
+      throw new BadRequestException('conversationId is required');
+    if (!body?.content?.trim())
+      throw new BadRequestException('content is required');
+
+    return this.messageService.createMessage({
+      conversationId: body.conversationId,
+      senderBy: user.userId,
+      content: body.content.trim(),
+      messageType: body.messageType,
+      replyToMessageId: body.replyToMessageId,
+      clientMessageId: body.clientMessageId,
+      mediaUrl: body.mediaUrl,
+      fileName: body.fileName,
+      fileSize: body.fileSize,
+    });
   }
 
   @Post('revoke-for-everyone')
   async revokeForEveryone(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       messageId?: string;
-      userId?: string;
       conversationId?: string;
     },
   ) {
@@ -62,13 +80,9 @@ export class MessageController {
       throw new BadRequestException('messageId is required');
     }
 
-    if (!body?.userId) {
-      throw new BadRequestException('userId is required');
-    }
-
     const result = await this.messageService.revokeMessageForEveryone({
       messageId: body.messageId,
-      revokedBy: body.userId,
+      revokedBy: user.userId,
       conversationId: body.conversationId,
     });
 
@@ -84,10 +98,10 @@ export class MessageController {
 
   @Post('emoji')
   async reactToMessage(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       messageId?: string;
-      userId?: string;
       emoji?: string;
       conversationId?: string;
     },
@@ -96,17 +110,13 @@ export class MessageController {
       throw new BadRequestException('messageId is required');
     }
 
-    if (!body?.userId) {
-      throw new BadRequestException('userId is required');
-    }
-
     if (!body?.emoji) {
       throw new BadRequestException('emoji is required');
     }
 
     const result = await this.messageService.reactToMessage({
       messageId: body.messageId,
-      userId: body.userId,
+      userId: user.userId,
       emoji: body.emoji,
       conversationId: body.conversationId,
     });
@@ -115,7 +125,7 @@ export class MessageController {
       conversationId: result.conversationId,
       messageId: result.messageId,
       reactions: result.reactions,
-      actedBy: body.userId,
+      actedBy: user.userId,
       action: 'set',
       emoji: body.emoji,
     });
@@ -125,10 +135,10 @@ export class MessageController {
 
   @Post('emoji/remove')
   async removeReaction(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       messageId?: string;
-      userId?: string;
       conversationId?: string;
     },
   ) {
@@ -136,13 +146,9 @@ export class MessageController {
       throw new BadRequestException('messageId is required');
     }
 
-    if (!body?.userId) {
-      throw new BadRequestException('userId is required');
-    }
-
     const result = await this.messageService.removeReaction({
       messageId: body.messageId,
-      userId: body.userId,
+      userId: user.userId,
       conversationId: body.conversationId,
     });
 
@@ -150,7 +156,7 @@ export class MessageController {
       conversationId: result.conversationId,
       messageId: result.messageId,
       reactions: result.reactions,
-      actedBy: body.userId,
+      actedBy: user.userId,
       action: 'remove',
     });
 
@@ -159,10 +165,10 @@ export class MessageController {
 
   @Post('delete-for-me')
   deleteForMe(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       messageId?: string;
-      userId?: string;
       conversationId?: string;
     },
   ) {
@@ -170,28 +176,28 @@ export class MessageController {
       throw new BadRequestException('messageId is required');
     }
 
-    if (!body?.userId) {
-      throw new BadRequestException('userId is required');
-    }
-
     return this.messageService.deleteMessageForMe({
       messageId: body.messageId,
-      userId: body.userId,
+      userId: user.userId,
       conversationId: body.conversationId,
     });
   }
 
   @Post('forward')
   forwardMessage(
+    @CurrentUser() user: JwtPayload,
     @Body()
     body: {
       sourceMessageId?: string;
       targetConversationId?: string;
-      forwardedBy?: string;
       clientMessageId?: string;
       content?: string;
     },
   ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
     if (!body?.sourceMessageId) {
       throw new BadRequestException('sourceMessageId is required');
     }
@@ -200,14 +206,10 @@ export class MessageController {
       throw new BadRequestException('targetConversationId is required');
     }
 
-    if (!body?.forwardedBy) {
-      throw new BadRequestException('forwardedBy is required');
-    }
-
     return this.messageService.forwardMessage({
       sourceMessageId: body.sourceMessageId,
       targetConversationId: body.targetConversationId,
-      forwardedBy: body.forwardedBy,
+      forwardedBy: user.userId,
       clientMessageId: body.clientMessageId,
       content: body.content,
     });
@@ -221,13 +223,17 @@ export class MessageController {
     }),
   )
   async uploadForChat(
+    @CurrentUser() user: JwtPayload,
     @UploadedFile() file: Express.Multer.File,
     @Body()
     body: {
       conversationId: string;
-      senderBy?: string;
     },
   ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
     if (!file) {
       throw new BadRequestException('file is required');
     }
@@ -236,9 +242,7 @@ export class MessageController {
       throw new BadRequestException('conversationId is required');
     }
 
-    const keyPrefix = body.senderBy
-      ? `chats/${body.conversationId}/${body.senderBy}`
-      : `chats/${body.conversationId}`;
+    const keyPrefix = `chats/${body.conversationId}/${user.userId}`;
 
     const uploaded = await this.s3UploadService.uploadFile(file, keyPrefix);
 
@@ -259,16 +263,20 @@ export class MessageController {
     }),
   )
   async sendFile(
+    @CurrentUser() user: JwtPayload,
     @UploadedFile() file: Express.Multer.File,
     @Body()
     body: {
       conversationId?: string;
-      senderBy?: string;
       clientMessageId?: string;
       replyToMessageId?: string;
       content?: string;
     },
   ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
     if (!file) {
       throw new BadRequestException('file is required');
     }
@@ -277,16 +285,12 @@ export class MessageController {
       throw new BadRequestException('conversationId is required');
     }
 
-    if (!body?.senderBy) {
-      throw new BadRequestException('senderBy is required');
-    }
-
-    const keyPrefix = `chats/${body.conversationId}/${body.senderBy}`;
+    const keyPrefix = `chats/${body.conversationId}/${user.userId}`;
     const uploaded = await this.s3UploadService.uploadFile(file, keyPrefix);
 
     return this.messageService.sendFileMessage({
       conversationId: body.conversationId,
-      senderBy: body.senderBy,
+      senderBy: user.userId,
       mediaUrl: uploaded.url,
       fileName: file.originalname,
       fileSize: file.size,

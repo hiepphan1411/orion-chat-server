@@ -8,25 +8,25 @@ export type MessageDocument = Message & Document;
 @Schema({ timestamps: true })
 export class Message {
   @Prop()
-  content: string;
+  content: string | undefined;
 
   @Prop()
-  mediaUrl: string;
+  mediaUrl: string | undefined;
 
   @Prop()
-  fileName: string;
+  fileName: string | undefined;
 
   @Prop()
-  fileSize: number;
+  fileSize: number | undefined;
 
   @Prop({ default: false })
-  isPinned: boolean;
+  isPinned: boolean | undefined;
 
   @Prop({ default: false })
-  isDeleted: boolean;
+  isDeleted: boolean | undefined;
 
   @Prop({ type: [String], default: [] })
-  deletedForUsers: string[];
+  deletedForUsers: string[] | undefined;
 
   @Prop({ default: null })
   replyToMessageId?: string;
@@ -35,13 +35,13 @@ export class Message {
   forwardedFromMessageId?: string;
 
   @Prop({ required: true })
-  senderBy: string;
+  senderBy: string | undefined;
 
   @Prop({ required: true })
-  conversationId: string;
+  conversationId: string | undefined;
 
   @Prop()
-  clientMessageId: string;
+  clientMessageId: string | undefined;
 
   @Prop({
     type: [
@@ -52,7 +52,7 @@ export class Message {
     ],
     default: [],
   })
-  seenBy: Array<{ userId: string; seenAt: Date }>;
+  seenBy: Array<{ userId: string; seenAt: Date }> | undefined;
 
   @Prop({
     type: [
@@ -64,21 +64,29 @@ export class Message {
     ],
     default: [],
   })
-  reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
+  reactions:
+    | Array<{ userId: string; emoji: string; reactedAt: Date }>
+    | undefined;
 
   @Prop({
     type: String,
     enum: MessageType,
     default: MessageType.TEXT,
   })
-  messageType: MessageType;
+  messageType: MessageType | undefined;
 
   @Prop({
     type: String,
     enum: MessageStatus,
     default: MessageStatus.SENT,
   })
-  messageStatus: MessageStatus;
+  messageStatus: MessageStatus | undefined;
+
+  @Prop({ type: Date, default: () => new Date() })
+  createdAt: Date | undefined;
+
+  @Prop({ type: Date, default: () => new Date() })
+  updatedAt: Date | undefined;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);

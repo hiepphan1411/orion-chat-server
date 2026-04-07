@@ -282,6 +282,9 @@ export class MessageService {
       forwardedFromMessageId: String(source._id),
       forwardedBy: payload.forwardedBy,
       createdAt: created.get('createdAt') as Date | undefined,
+      content: created.content,
+      messageType: created.messageType,
+      clientMessageId: created.clientMessageId,
     };
   }
 
