@@ -6,7 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectModel } from '@nestjs/mongoose'; // Thêm Mongoose
 import { Model, PipelineStage } from 'mongoose';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
@@ -23,6 +23,9 @@ type MessageDetail = {
   messageStatus?: string;
   isPinned?: boolean;
   isDeleted?: boolean;
+  isRevoked?: boolean;
+  revokedBy?: string;
+  revokedAt?: Date | string;
   replyToMessageId?: string | null;
   seenBy?: Array<{ userId: string; seenAt: Date | string }>;
   createdAt?: Date | string;
@@ -361,18 +364,43 @@ export class ConversationService {
     }
 
     // Populate sender user info (fullName, avatarUrl)
-    const senderPhoneNumbers = [
+    // Handle both UUID (new) and phoneNumber (legacy) senderBy values
+    const senderIdentifiers = [
       ...new Set(deduped.map((m) => m.senderBy).filter(Boolean)),
     ] as string[];
 
-    if (senderPhoneNumbers.length > 0) {
-      const users = await this.userRepo.find({
-        where: senderPhoneNumbers.map((phoneNumber) => ({
-          phoneNumber,
-        })),
-      });
+    if (senderIdentifiers.length > 0) {
+      // Separate identifiers into UUIDs and phone numbers
+      // UUID format: 8-4-4-4-12 hex characters (36 chars with dashes)
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const uuids = senderIdentifiers.filter((id) => uuidRegex.test(id));
+      const phoneNumbers = senderIdentifiers.filter(
+        (id) => !uuidRegex.test(id),
+      );
 
-      const userMap = new Map(users.map((u) => [u.phoneNumber, u]));
+      const userMap = new Map<string, User>();
+
+      // Query users by UUID (new format)
+      if (uuids.length > 0) {
+        const usersByUuid = await this.userRepo.find({
+          where: { userId: In(uuids) },
+        });
+        usersByUuid.forEach((u) => {
+          userMap.set(u.userId, u);
+        });
+      }
+
+      // Query users by phoneNumber (legacy format)
+      if (phoneNumbers.length > 0) {
+        const usersByPhone = await this.userRepo.find({
+          where: { phoneNumber: In(phoneNumbers) },
+        });
+        usersByPhone.forEach((user) => {
+          userMap.set(user.phoneNumber, user);
+          userMap.set(user.userId, user); // Also add UUID key for consistency
+        });
+      }
 
       deduped.forEach((msg) => {
         if (msg.senderBy && userMap.has(msg.senderBy)) {

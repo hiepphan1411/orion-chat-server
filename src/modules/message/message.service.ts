@@ -58,7 +58,7 @@ export class MessageService {
       _id: unknown;
       conversationId: string;
       senderBy: string;
-      isDeleted: boolean;
+      isRevoked: boolean;
     } | null>();
 
     if (!message) {
@@ -80,19 +80,16 @@ export class MessageService {
       );
     }
 
-    if (!message.isDeleted) {
+    const revokedAt = new Date();
+
+    if (!message.isRevoked) {
       await this.messageModel.updateOne(
         { _id: payload.messageId },
         {
           $set: {
-            isDeleted: true,
-            content: '',
-          },
-          $unset: {
-            mediaUrl: '',
-            fileName: '',
-            fileSize: '',
-            replyToMessageId: '',
+            isRevoked: true,
+            revokedBy: payload.revokedBy,
+            revokedAt: revokedAt,
           },
         },
       );
@@ -102,8 +99,8 @@ export class MessageService {
       messageId: String(message._id),
       conversationId: String(message.conversationId),
       revokedBy: payload.revokedBy,
-      revokedAt: new Date().toISOString(),
-      alreadyRevoked: !!message.isDeleted,
+      revokedAt: revokedAt.toISOString(),
+      alreadyRevoked: !!message.isRevoked,
     };
   }
 

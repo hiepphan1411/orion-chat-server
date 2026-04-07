@@ -159,7 +159,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .to(`conversation:${payload.conversationId}`)
       .emit('chat:message_recalled', {
         ...payload,
-        isDeleted: true,
+        isRevoked: true,
       });
   }
 

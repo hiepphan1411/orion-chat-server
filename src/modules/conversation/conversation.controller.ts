@@ -40,11 +40,20 @@ export class ConversationController {
     if (!user?.userId) {
       throw new BadRequestException('User not found in token');
     }
-    return this.conversationService.findDetailById(conversationId, user.userId);
+    try {
+      return await this.conversationService.findDetailById(
+        conversationId,
+        user.userId,
+      );
+    } catch (error) {
+      console.error('=== ERROR getConversationDetail ===');
+      console.error(error);
+      throw error; // giữ nguyên để NestJS xử lý
+    }
   }
 
   @Get(':conversationId/messages')
-  getConversationMessages(
+  async getConversationMessages(
     @Param('conversationId') conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Query('cursor') cursor?: string,
@@ -53,12 +62,18 @@ export class ConversationController {
     if (!user?.userId) {
       throw new BadRequestException('User ID is required');
     }
-    return this.conversationService.getMessagesByConversation(
-      conversationId,
-      user.userId,
-      cursor,
-      limit ? Number(limit) : 30,
-    );
+    try {
+      return await this.conversationService.getMessagesByConversation(
+        conversationId,
+        user.userId,
+        cursor,
+        limit ? Number(limit) : 30,
+      );
+    } catch (error) {
+      console.error('=== ERROR getMessagesByConversation ===');
+      console.error(error);
+      throw error;
+    }
   }
 
   @Post(':conversationId/messages')

@@ -78,9 +78,9 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private generateJwtToken(phoneNumber: string): string {
+  private generateJwtToken(phoneNumber: string, userId: string): string {
     return this.jwtService.sign(
-      { phoneNumber },
+      { phoneNumber, userId },
       {
         expiresIn: '24h', // ✅ Token valid for 24 hours
       },
@@ -412,8 +412,8 @@ export class AuthService {
 
       this.logger.log(`Login successful for: ${phoneNumber}`);
 
-      // Generate JWT token
-      const token = this.generateJwtToken(phoneNumber);
+      // Generate JWT token with both phoneNumber and userId (UUID)
+      const token = this.generateJwtToken(phoneNumber, user.userId);
 
       // quản lý phiên đăng nhập
       const now = new Date();

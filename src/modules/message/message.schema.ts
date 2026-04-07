@@ -8,25 +8,34 @@ export type MessageDocument = Message & Document;
 @Schema({ timestamps: true })
 export class Message {
   @Prop()
-  content: string | undefined;
+  content: string;
 
   @Prop()
-  mediaUrl: string | undefined;
+  mediaUrl: string;
 
   @Prop()
-  fileName: string | undefined;
+  fileName: string;
 
   @Prop()
-  fileSize: number | undefined;
+  fileSize: number;
 
   @Prop({ default: false })
-  isPinned: boolean | undefined;
+  isPinned: boolean;
 
   @Prop({ default: false })
-  isDeleted: boolean | undefined;
+  isDeleted: boolean;
 
   @Prop({ type: [String], default: [] })
-  deletedForUsers: string[] | undefined;
+  deletedForUsers: string[];
+
+  @Prop({ default: false })
+  isRevoked: boolean;
+
+  @Prop({ default: null })
+  revokedBy?: string;
+
+  @Prop({ default: null })
+  revokedAt?: Date;
 
   @Prop({ default: null })
   replyToMessageId?: string;
@@ -35,13 +44,16 @@ export class Message {
   forwardedFromMessageId?: string;
 
   @Prop({ required: true })
-  senderBy: string | undefined;
+  // NOTE: senderBy must ALWAYS be userId (UUID), NEVER phoneNumber
+  // This is used to match against User.userId in PostgreSQL
+  // Frontend: Use senderBy === currentUser.userId to determine message ownership
+  senderBy: string;
 
   @Prop({ required: true })
-  conversationId: string | undefined;
+  conversationId: string;
 
   @Prop()
-  clientMessageId: string | undefined;
+  clientMessageId: string;
 
   @Prop({
     type: [
@@ -52,7 +64,7 @@ export class Message {
     ],
     default: [],
   })
-  seenBy: Array<{ userId: string; seenAt: Date }> | undefined;
+  seenBy: Array<{ userId: string; seenAt: Date }>;
 
   @Prop({
     type: [
@@ -64,29 +76,27 @@ export class Message {
     ],
     default: [],
   })
-  reactions:
-    | Array<{ userId: string; emoji: string; reactedAt: Date }>
-    | undefined;
+  reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
 
   @Prop({
     type: String,
     enum: MessageType,
     default: MessageType.TEXT,
   })
-  messageType: MessageType | undefined;
+  messageType: MessageType;
 
   @Prop({
     type: String,
     enum: MessageStatus,
     default: MessageStatus.SENT,
   })
-  messageStatus: MessageStatus | undefined;
+  messageStatus: MessageStatus;
 
   @Prop({ type: Date, default: () => new Date() })
-  createdAt: Date | undefined;
+  createdAt: Date;
 
   @Prop({ type: Date, default: () => new Date() })
-  updatedAt: Date | undefined;
+  updatedAt: Date;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
