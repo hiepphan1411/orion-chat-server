@@ -44,7 +44,8 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from './modules/conversation/entities/group-conversation.entity';
+import { ConversationParticipant } from './modules/conversation/entities/conversation-participant.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -65,7 +66,7 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { Conversation } from './modules/conversation/entities/conversation.schema';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
@@ -109,6 +110,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
         Report,
         Admin,
         Conversation,
+        ConversationParticipant,
         SubTask,
         Comment,
         Attachment,

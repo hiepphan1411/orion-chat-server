@@ -6,7 +6,9 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  console.log('🚀 [bootstrap] Starting bootstrap...');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  console.log('✅ [bootstrap] NestFactory.create completed');
 
   const allowedOrigins = [
     'http://localhost:5173',
@@ -39,8 +41,9 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
-  // app.enableCors();
-
-  await app.listen(process.env.PORT ?? 3000);
+  console.log('🔄 [bootstrap] Calling app.listen()...');
+  const server = await app.listen(process.env.PORT ?? 3000);
+  console.log(`✅ [bootstrap] Server listening on port ${process.env.PORT ?? 3000}`);
+  console.log(`🎉 Application is running on: ${await app.getUrl()}`);
 }
 bootstrap().catch(console.error);
