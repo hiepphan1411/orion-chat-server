@@ -21,7 +21,11 @@ export class Conversation {
   @PrimaryGeneratedColumn('uuid')
   conversationId: string;
 
-  @Column({ type: 'enum', enum: ConversationType })
+  @Column({
+    type: 'enum',
+    enum: ConversationType,
+    default: ConversationType.PRIVATE,
+  })
   @Index()
   type: ConversationType;
 

@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -21,7 +22,14 @@ export class GroupMember {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => GroupConversation, { eager: true, onDelete: 'CASCADE' })
+  @ManyToOne(() => GroupConversation, (group) => group.members, {
+    eager: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({
+    name: 'groupConversationId',
+    referencedColumnName: 'conversationId',
+  })
   group: GroupConversation;
 
   @ManyToOne(() => User, { eager: true, onDelete: 'CASCADE' })
