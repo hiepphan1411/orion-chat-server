@@ -1,13 +1,17 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectModel } from '@nestjs/mongoose'; // Thêm Mongoose
 import { Model, PipelineStage } from 'mongoose';
 import { Repository, In } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { MessageType } from 'src/common/enums/message-type.enum';
+import { Conversation, ConversationType } from './entities/conversation.schema';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
 import { User } from '../users/entities/user.entity';
@@ -57,6 +61,8 @@ type CreateConversationMessagePayload = {
 @Injectable()
 export class ConversationService {
   constructor(
+    @InjectRepository(Conversation)
+    private readonly conversationRepo: Repository<Conversation>,
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
     @InjectRepository(User)
@@ -85,11 +91,27 @@ export class ConversationService {
 
     const messageMap = await this.getLastMessageMap(conversationIds, userId);
 
+    // ✅ Lấy block status của từng conversation
+    const blockStatusMap = new Map<
+      string,
+      {
+        isBlocked: boolean;
+        blockedUserId: string | null;
+        blockedBy: string | null;
+        blockedAt: Date | null;
+      }
+    >();
+    for (const convId of conversationIds) {
+      const blockStatus = await this.getConversationBlockStatus(convId);
+      blockStatusMap.set(convId, blockStatus);
+    }
+
     return memberships.map((m) => {
       const convId = m.conversation.conversationId;
       const latestMsg = messageMap.get(convId);
+      const blockStatus = blockStatusMap.get(convId);
 
-      return this.toConversationView(m, latestMsg ?? null);
+      return this.toConversationView(m, latestMsg ?? null, blockStatus);
     });
   }
 
@@ -104,7 +126,11 @@ export class ConversationService {
     );
 
     const latestMsg = lastMessageArr.length > 0 ? lastMessageArr[0] : null;
-    return this.toConversationView(membership, latestMsg);
+
+    // ✅ Lấy block status của conversation
+    const blockStatus = await this.getConversationBlockStatus(conversationId);
+
+    return this.toConversationView(membership, latestMsg, blockStatus);
   }
 
   async getMessagesByConversation(
@@ -141,10 +167,35 @@ export class ConversationService {
     actorUserId: string,
     payload: CreateConversationMessagePayload,
   ): Promise<MessageDocument> {
-    await this.requireMembership(conversationId, actorUserId);
+    // ✅ Verify user là member của conversation (throws nếu không phải member)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _membership = await this.requireMembership(
+      conversationId,
+      actorUserId,
+    );
 
     if (payload.senderBy !== actorUserId) {
       throw new ForbiddenException('senderBy must match userId');
+    }
+
+    // ✅ Kiểm tra trạng thái chặn của conversation
+    const blockStatus = await this.getConversationBlockStatus(conversationId);
+
+    // Nếu conversation bị chặn
+    if (blockStatus.isBlocked) {
+      // Nếu current user là người BỊ CHẶN: không thể gửi tin nhắn
+      if (blockStatus.blockedUserId === actorUserId) {
+        throw new ForbiddenException(
+          `You are blocked from sending messages in this conversation. Blocked by: ${blockStatus.blockedBy}`,
+        );
+      }
+
+      // Nếu current user là người CHẶN: cũng không thể gửi (logic: nếu chặn thì không nên gửi)
+      if (blockStatus.blockedBy === actorUserId) {
+        throw new ForbiddenException(
+          'You blocked this user. Unblock them to send messages.',
+        );
+      }
     }
 
     const normalizedType = this.normalizeMessageType(payload.messageType);
@@ -438,9 +489,45 @@ export class ConversationService {
     return null;
   }
 
+  /**
+   * Lấy trạng thái chặn của conversation (kiểm tra tất cả participants)
+   * Trả về: ai bị chặn, ai là người chặn
+   */
+  private async getConversationBlockStatus(conversationId: string) {
+    // Query tất cả participants của conversation
+    const participants = await this.participantRepo.find({
+      where: { conversationId },
+    });
+
+    // Tìm participant nào có isBlocked = true
+    const blockedParticipant = participants.find((p) => p.isBlocked);
+
+    if (blockedParticipant) {
+      return {
+        isBlocked: true,
+        blockedUserId: blockedParticipant.userId,
+        blockedBy: blockedParticipant.blockedBy,
+        blockedAt: blockedParticipant.blockedAt,
+      };
+    }
+
+    return {
+      isBlocked: false,
+      blockedUserId: null,
+      blockedBy: null,
+      blockedAt: null,
+    };
+  }
+
   private toConversationView(
     membership: ConversationParticipant,
     latestMsg: MessageDetail | null,
+    blockStatus?: {
+      isBlocked: boolean;
+      blockedUserId: string | null;
+      blockedBy: string | null;
+      blockedAt: Date | null;
+    },
   ) {
     const c = membership.conversation;
 
@@ -451,6 +538,21 @@ export class ConversationService {
       createdAt: c.createdAt,
       myRole: membership.role,
       myJoinedAt: membership.joinedAt,
+      // ✅ Security status của current user
+      myIsHidden: membership.isHidden,
+      myIsBlocked:
+        blockStatus?.isBlocked &&
+        blockStatus?.blockedUserId === membership.userId,
+      myBlockedAt:
+        blockStatus?.isBlocked &&
+        blockStatus?.blockedUserId === membership.userId
+          ? blockStatus?.blockedAt
+          : null,
+      myBlockedBy:
+        blockStatus?.isBlocked &&
+        blockStatus?.blockedUserId === membership.userId
+          ? blockStatus?.blockedBy
+          : null,
       lastMessage: latestMsg
         ? {
             content: latestMsg.content,
@@ -467,6 +569,17 @@ export class ConversationService {
             ownerId: c.groupInfo.ownerId,
           }
         : null,
+      // ✅ Trạng thái CHẶN của cuộc hội thoại (ai chặn ai)
+      blockStatus: blockStatus || {
+        isBlocked: false,
+        blockedUserId: null,
+        blockedBy: null,
+        blockedAt: null,
+      },
+      // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
+      canUnblock:
+        blockStatus?.isBlocked && blockStatus?.blockedBy === membership.userId,
+      // Danh sách participants
       participants: c.participants.map((p) => ({
         userId: p.userId,
         fullName: p.user?.fullName ?? null,
@@ -474,7 +587,397 @@ export class ConversationService {
         role: p.role,
         joinedAt: p.joinedAt,
         lastReadMessageId: p.lastReadMessageId,
+        isHidden: p.isHidden,
+        // ✅ Block status của participant khác
+        isBlocked: p.isBlocked,
+        blockedAt: p.blockedAt,
+        blockedBy: p.blockedBy,
       })),
+    };
+  }
+
+  // ==================== SECURITY FEATURES ====================
+
+  /**
+   * Cập nhật thời gian tự xóa tin nhắn cho conversation
+   * @param conversationId ID của conversation
+   * @param userId ID của user hiện tại (verify membership)
+   * @param autoDeleteDuration Số ngày (0 = không tự xóa)
+   */
+  async updateAutoDeleteDuration(
+    conversationId: string,
+    userId: string,
+    autoDeleteDuration: number,
+  ) {
+    // Verify user là thành viên của conversation
+    await this.requireMembership(conversationId, userId);
+
+    // Cập nhật autoDeleteDuration trong Conversation entity
+    await this.conversationRepo.update(
+      { conversationId },
+      { autoDeleteDuration },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      autoDeleteDuration,
+      message: 'Auto delete duration updated successfully',
+    };
+  }
+
+  /**
+   * Ẩn conversation bằng mật khẩu
+   */
+  async hideConversation(
+    conversationId: string,
+    userId: string,
+    password: string,
+  ) {
+    const membership = await this.requireMembership(conversationId, userId);
+
+    if (!membership) {
+      throw new ForbiddenException('User is not a member of this conversation');
+    }
+
+    // Hash mật khẩu bằng bcrypt (salt rounds = 10)
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Cập nhật vào database
+    await this.participantRepo.update(
+      { conversationId, userId },
+      { isHidden: true, hidePasswordHash: hashedPassword },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      message: 'Conversation hidden successfully',
+    };
+  }
+
+  /**
+   * Tiết lộ conversation bị ẩn bằng mật khẩu
+   */
+  async revealConversation(
+    conversationId: string,
+    userId: string,
+    password: string,
+  ) {
+    const membership = await this.requireMembership(conversationId, userId);
+
+    if (!membership) {
+      throw new ForbiddenException('User is not a member of this conversation');
+    }
+
+    if (!membership.isHidden) {
+      throw new BadRequestException('This conversation is not hidden');
+    }
+
+    // Verify mật khẩu
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      membership.hidePasswordHash || '',
+    );
+
+    if (!isPasswordValid) {
+      throw new ForbiddenException('Invalid password');
+    }
+
+    // Cập nhật vào database
+    await this.participantRepo.update(
+      { conversationId, userId },
+      { isHidden: false, hidePasswordHash: null },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      message: 'Conversation revealed successfully',
+    };
+  }
+
+  /**
+   * Xóa toàn bộ lịch sử chat cho user hiện tại (soft delete)
+   * Logic: Thêm userId vào deletedForUsers của tất cả message trong conversation
+   */
+  async clearChatHistory(conversationId: string, userId: string) {
+    const membership = await this.requireMembership(conversationId, userId);
+
+    if (!membership) {
+      throw new ForbiddenException('User is not a member of this conversation');
+    }
+
+    // Update tất cả message của conversation: thêm userId vào deletedForUsers
+    const result = await this.messageModel.updateMany(
+      { conversationId },
+      {
+        $addToSet: { deletedForUsers: userId }, // Add user to deletedForUsers array (nếu chưa có)
+      },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      deletedMessagesCount: result.modifiedCount,
+      message: 'Chat history cleared successfully',
+    };
+  }
+
+  /**
+   * Xác minh mật khẩu của conversation bị ẩn
+   * @returns true nếu mật khẩu đúng
+   */
+  async verifyHiddenConversationPassword(
+    conversationId: string,
+    userId: string,
+    password: string,
+  ): Promise<boolean> {
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+    });
+
+    if (!membership || !membership.isHidden) {
+      return false;
+    }
+
+    return bcrypt.compare(password, membership.hidePasswordHash || '');
+  }
+
+  /**
+   * Kiểm tra xem user có bị chặn trong conversation không
+   */
+  async isUserBlocked(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+    });
+
+    return membership?.isBlocked ?? false;
+  }
+
+  /**
+   * Lấy chi tiết về trạng thái block (ai block ai)
+   */
+  async getBlockDetails(
+    conversationId: string,
+    userId: string,
+  ): Promise<{
+    isBlocked: boolean;
+    blockedBy?: string | null;
+    blockedAt?: Date | null;
+  }> {
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+    });
+
+    return {
+      isBlocked: membership?.isBlocked ?? false,
+      blockedBy: membership?.blockedBy,
+      blockedAt: membership?.blockedAt,
+    };
+  }
+
+  /**
+   * Chặn người dùng kia trong PRIVATE conversation
+   * Tự động lấy người kia từ danh sách participants
+   *
+   * @param conversationId ID của conversation
+   * @param requesterId ID của người yêu cầu chặn
+   */
+  async blockUserInConversation(conversationId: string, requesterId: string) {
+    // Verify membership và lấy conversation detail
+    const membership = await this.requireMembership(
+      conversationId,
+      requesterId,
+    );
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Verify conversation là PRIVATE (chỉ áp dụng cho 1:1 chat)
+    const conversation = membership.conversation;
+    if (conversation.type !== ConversationType.PRIVATE) {
+      throw new ForbiddenException(
+        'Block feature is only available for private conversations',
+      );
+    }
+
+    // Lấy người kia từ participants (PRIVATE conversation chỉ có 2 người)
+    const otherUser = conversation.participants?.find(
+      (p) => p.userId !== requesterId,
+    );
+
+    if (!otherUser) {
+      throw new NotFoundException(
+        'Other participant not found in conversation',
+      );
+    }
+
+    // Gọi blockUser với targetUserId của người kia
+    return this.blockUser(conversationId, requesterId, otherUser.userId);
+  }
+
+  /**
+   * Bỏ chặn người dùng kia trong PRIVATE conversation
+   * Tự động lấy người kia từ danh sách participants
+   * Chỉ người đã chặn mới có thể bỏ chặn
+   *
+   * @param conversationId ID của conversation
+   * @param requesterId ID của người yêu cầu bỏ chặn
+   */
+  async unblockUserInConversation(conversationId: string, requesterId: string) {
+    // Verify membership và lấy conversation detail
+    const membership = await this.requireMembership(
+      conversationId,
+      requesterId,
+    );
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Verify conversation là PRIVATE
+    if (membership.conversation.type !== ConversationType.PRIVATE) {
+      throw new ForbiddenException(
+        'Unblock feature is only available for private conversations',
+      );
+    }
+
+    // Lấy người kia từ participants
+    const otherUser = membership.conversation.participants?.find(
+      (p) => p.userId !== requesterId,
+    );
+
+    if (!otherUser) {
+      throw new NotFoundException(
+        'Other participant not found in conversation',
+      );
+    }
+
+    // Gọi unblockUser với targetUserId của người kia
+    return this.unblockUser(conversationId, requesterId, otherUser.userId);
+  }
+
+  /**
+   * @param requesterId ID của người yêu cầu (must be member)
+   * @param targetUserId ID của người bị chặn
+   */
+  async blockUser(
+    conversationId: string,
+    requesterId: string,
+    targetUserId: string,
+  ) {
+    const requesterMembership = await this.requireMembership(
+      conversationId,
+      requesterId,
+    );
+
+    if (!requesterMembership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Verify conversation là PRIVATE (chỉ áp dụng cho 1-1 chat)
+    const conversation = requesterMembership.conversation;
+    if (conversation.type !== ConversationType.PRIVATE) {
+      throw new ForbiddenException(
+        'Block feature is only available for private conversations',
+      );
+    }
+
+    // Verify target user là thành viên
+    const targetMembership = await this.participantRepo.findOne({
+      where: { conversationId, userId: targetUserId },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException(
+        'Target user is not a member of this conversation',
+      );
+    }
+
+    // Không được chặn chính mình
+    if (requesterId === targetUserId) {
+      throw new BadRequestException('You cannot block yourself');
+    }
+
+    // Cập nhật vào database - lưu ai chặn người này
+    await this.participantRepo.update(
+      { conversationId, userId: targetUserId },
+      { isBlocked: true, blockedAt: new Date(), blockedBy: requesterId },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      blockedUserId: targetUserId,
+      blockedBy: requesterId,
+      message: `User ${targetUserId} has been blocked`,
+    };
+  }
+
+  /**
+   * Bỏ chặn người dùng trong conversation
+   * CHỈ NGƯỜI CHẶN MỚI CÓ THỂ BỎ CHẶN (verify blockedBy == requesterId)
+   */
+  async unblockUser(
+    conversationId: string,
+    requesterId: string,
+    targetUserId: string,
+  ) {
+    const requesterMembership = await this.requireMembership(
+      conversationId,
+      requesterId,
+    );
+
+    if (!requesterMembership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Verify conversation là PRIVATE
+    if (requesterMembership.conversation.type !== ConversationType.PRIVATE) {
+      throw new ForbiddenException(
+        'Unblock feature is only available for private conversations',
+      );
+    }
+
+    // Verify target user là thành viên và bị chặn
+    const targetMembership = await this.participantRepo.findOne({
+      where: { conversationId, userId: targetUserId },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException(
+        'Target user is not a member of this conversation',
+      );
+    }
+
+    // Verify user bị chặn
+    if (!targetMembership.isBlocked) {
+      throw new BadRequestException('User is not blocked');
+    }
+
+    // ✅ CHỈ CÓ NGƯỜI CHẶN MỚI CÓ THỂ BỎ CHẶN
+    if (targetMembership.blockedBy !== requesterId) {
+      throw new ForbiddenException(
+        'Only the person who blocked this user can unblock them',
+      );
+    }
+
+    // Cập nhật vào database
+    await this.participantRepo.update(
+      { conversationId, userId: targetUserId },
+      { isBlocked: false, blockedAt: null, blockedBy: null },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      unblockedUserId: targetUserId,
+      message: `User ${targetUserId} has been unblocked`,
     };
   }
 }

@@ -9,6 +9,7 @@ import {
   Param,
   Delete,
   Patch,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConversationService } from './conversation.service';
 import type { JwtPayload } from 'jsonwebtoken';
@@ -17,6 +18,11 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { UseGuards } from '@nestjs/common';
 import { ChatGateway } from '../message/chat.gateway';
 import { MessageService } from '../message/message.service';
+import { UpdateAutoDeleteDTO } from './dto/update-auto-delete.dto';
+import {
+  HideConversationDTO,
+  RevealConversationDTO,
+} from './dto/hide-conversation.dto';
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -270,5 +276,182 @@ export class ConversationController {
     });
 
     return result;
+  }
+
+  // ==================== SECURITY FEATURES ====================
+
+  /**
+   * Cập nhật thời gian tự xóa tin nhắn cho conversation
+   * @route PATCH /conversations/:conversationId/auto-delete-duration
+   */
+  @Patch(':conversationId/auto-delete-duration')
+  async updateAutoDeleteDuration(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateAutoDeleteDTO,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.updateAutoDeleteDuration(
+      conversationId,
+      user.userId,
+      dto.autoDeleteDuration,
+    );
+  }
+
+  /**
+   * Ẩn conversation bằng mật khẩu
+   * @route POST /conversations/:conversationId/hide
+   */
+  @Post(':conversationId/hide')
+  async hideConversation(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: HideConversationDTO,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.hideConversation(
+      conversationId,
+      user.userId,
+      dto.password,
+    );
+  }
+
+  /**
+   * Tiết lộ conversation bị ẩn bằng mật khẩu
+   * @route POST /conversations/:conversationId/reveal
+   */
+  @Post(':conversationId/reveal')
+  async revealConversation(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: RevealConversationDTO,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.revealConversation(
+      conversationId,
+      user.userId,
+      dto.password,
+    );
+  }
+
+  /**
+   * Xóa toàn bộ lịch sử chat cho user hiện tại (soft delete)
+   * @route POST /conversations/:conversationId/clear-history
+   */
+  @Post(':conversationId/clear-history')
+  async clearChatHistory(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.clearChatHistory(
+      conversationId,
+      user.userId,
+    );
+  }
+
+  /**
+   * Chặn người dùng trong cuộc hội thoại
+   * Chỉ áp dụng cho PRIVATE conversation (1:1 chat)
+   * Tự động chặn người kia (vì PRIVATE conversation chỉ có 2 người)
+   *
+   * @route POST /conversations/:conversationId/block
+   */
+  @Post(':conversationId/block')
+  async blockUser(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.blockUserInConversation(
+      conversationId,
+      user.userId,
+    );
+  }
+
+  /**
+   * Bỏ chặn người dùng trong cuộc hội thoại
+   * Chỉ người chặn mới có thể bỏ chặn
+   *
+   * @route POST /conversations/:conversationId/unblock
+   */
+  @Post(':conversationId/unblock')
+  async unblockUser(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.unblockUserInConversation(
+      conversationId,
+      user.userId,
+    );
+  }
+
+  /**
+   * Kiểm tra trạng thái chặn của conversation
+   * Thông tin:
+   * - isBlocked: có ai bị chặn trong conversation không
+   * - blockedUserId: userId của người bị chặn (nếu có)
+   * - blockedBy: userId của người chặn (nếu có)
+   * - canUnblock: current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
+   * - disableCall: nếu current user bị chặn thì disable call/video features
+   *
+   * @route GET /conversations/:conversationId/block-status
+   */
+  @Get(':conversationId/block-status')
+  async getMyBlockStatus(
+    @Param('conversationId') conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    const membership = await this.conversationService.findDetailById(
+      conversationId,
+      user.userId,
+    );
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const blockStatus = membership.blockStatus;
+
+    return {
+      conversationId,
+      // ✅ Trạng thái chặn của conversation
+      isBlocked: blockStatus.isBlocked,
+      blockedUserId: blockStatus.blockedUserId, // UUID của người BỊ CHẶN
+      blockedBy: blockStatus.blockedBy, // UUID của NGƯỜI CHẶN
+      blockedAt: blockStatus.blockedAt,
+      // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể)
+      canUnblock:
+        blockStatus.isBlocked && blockStatus.blockedBy === user.userId,
+      // ✅ Current user bị chặn không (disable call/video features)
+      iAmBlocked:
+        blockStatus.isBlocked && blockStatus.blockedUserId === user.userId,
+      // Backend helper cho FE
+      iAmTheBlocker:
+        blockStatus.isBlocked && blockStatus.blockedBy === user.userId,
+    };
   }
 }
