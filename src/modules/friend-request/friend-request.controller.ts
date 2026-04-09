@@ -26,6 +26,11 @@ export class FriendRequestController {
     return this.friendRequestService.getIncoming(userId);
   }
 
+  @Get('outgoing')
+  getOutgoing(@Query('userId') userId: string) {
+    return this.friendRequestService.getOutgoing(userId);
+  }
+
   @Patch(':id/accept')
   acceptRequest(
     @Param('id') requestId: string,

@@ -1,6 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Friendship } from '../friendship/entities/friendship.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from '../friendship/entities/friendship.entity';
 import { In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { GroupMember } from '../group-member/entities/group-member.entity';
@@ -16,9 +23,27 @@ export class FriendsService {
     private readonly groupMemberRepo: Repository<GroupMember>,
   ) {}
 
+  private getSortedPair(userId: string, friendId: string): [string, string] {
+    return [userId, friendId].sort() as [string, string];
+  }
+
+  private async findFriendshipRecord(userId: string, friendId: string) {
+    const [leftId, rightId] = this.getSortedPair(userId, friendId);
+    return this.friendshipRepo.findOne({
+      where: {
+        userOne: { userId: leftId },
+        userTwo: { userId: rightId },
+      },
+      relations: ['userOne', 'userTwo'],
+    });
+  }
+
   private async getFriendIdSet(userId: string): Promise<Set<string>> {
     const rows = await this.friendshipRepo.find({
-      where: [{ userOne: { userId } }, { userTwo: { userId } }],
+      where: [
+        { userOne: { userId }, status: FriendshipStatus.ACTIVE },
+        { userTwo: { userId }, status: FriendshipStatus.ACTIVE },
+      ],
       relations: ['userOne', 'userTwo'],
     });
 
@@ -31,7 +56,10 @@ export class FriendsService {
 
   async getFriends(userId: string) {
     const rows = await this.friendshipRepo.find({
-      where: [{ userOne: { userId } }, { userTwo: { userId } }],
+      where: [
+        { userOne: { userId }, status: FriendshipStatus.ACTIVE },
+        { userTwo: { userId }, status: FriendshipStatus.ACTIVE },
+      ],
       relations: ['userOne', 'userTwo'],
       order: { createdAt: 'DESC' },
     });
@@ -133,7 +161,10 @@ export class FriendsService {
 
   async getRecentlyActive(userId: string) {
     const rows = await this.friendshipRepo.find({
-      where: [{ userOne: { userId } }, { userTwo: { userId } }],
+      where: [
+        { userOne: { userId }, status: FriendshipStatus.ACTIVE },
+        { userTwo: { userId }, status: FriendshipStatus.ACTIVE },
+      ],
       relations: ['userOne', 'userTwo'],
       order: { createdAt: 'DESC' },
       take: 20,
@@ -152,5 +183,128 @@ export class FriendsService {
       })
       .sort((a, b) => Number(b.isOnline) - Number(a.isOnline))
       .slice(0, 10);
+  }
+
+  async getBlockedFriends(userId: string) {
+    const rows = await this.friendshipRepo.find({
+      where: [
+        { userOne: { userId }, status: FriendshipStatus.BLOCKED },
+        { userTwo: { userId }, status: FriendshipStatus.BLOCKED },
+      ],
+      relations: ['userOne', 'userTwo'],
+      order: { createdAt: 'DESC' },
+    });
+
+    return rows.map((row) => {
+      const other = row.userOne.userId === userId ? row.userTwo : row.userOne;
+      return {
+        id: other.userId,
+        fullName: other.fullName,
+        avatarUrl: other.avatarUrl,
+        isOnline: other.isOnline,
+        blockedAt: row.createdAt,
+      };
+    });
+  }
+
+  async getFriendProfile(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new BadRequestException('Invalid friend identifier');
+    }
+
+    const friendship = await this.findFriendshipRecord(userId, friendId);
+    if (!friendship || friendship.status !== FriendshipStatus.ACTIVE) {
+      throw new NotFoundException('Friendship not found');
+    }
+
+    const friend =
+      friendship.userOne.userId === userId
+        ? friendship.userTwo
+        : friendship.userOne;
+
+    return {
+      id: friend.userId,
+      fullName: friend.fullName,
+      phoneNumber: friend.phoneNumber,
+      email: friend.email,
+      avatarUrl: friend.avatarUrl,
+      coverImage: friend.coverImage,
+      gender: friend.gender,
+      birthDate: friend.birthDate,
+      createdAt: friend.createdAt,
+      isOnline: friend.isOnline,
+      friendshipSince: friendship.createdAt,
+    };
+  }
+
+  async removeFriend(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new BadRequestException('Invalid friend identifier');
+    }
+
+    const friendship = await this.findFriendshipRecord(userId, friendId);
+    if (!friendship || friendship.status !== FriendshipStatus.ACTIVE) {
+      throw new NotFoundException('Friendship not found');
+    }
+
+    await this.friendshipRepo.remove(friendship);
+
+    return {
+      success: true,
+      message: 'Friend removed successfully',
+    };
+  }
+
+  async blockFriend(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new BadRequestException('Invalid friend identifier');
+    }
+
+    const [leftId, rightId] = this.getSortedPair(userId, friendId);
+    const [userOne, userTwo] = await Promise.all([
+      this.userRepo.findOne({ where: { userId: leftId } }),
+      this.userRepo.findOne({ where: { userId: rightId } }),
+    ]);
+
+    if (!userOne || !userTwo) {
+      throw new NotFoundException('User not found');
+    }
+
+    const friendship = await this.findFriendshipRecord(userId, friendId);
+
+    if (!friendship) {
+      const blocked = this.friendshipRepo.create({
+        userOne,
+        userTwo,
+        status: FriendshipStatus.BLOCKED,
+      });
+      await this.friendshipRepo.save(blocked);
+    } else if (friendship.status !== FriendshipStatus.BLOCKED) {
+      friendship.status = FriendshipStatus.BLOCKED;
+      await this.friendshipRepo.save(friendship);
+    }
+
+    return {
+      success: true,
+      message: 'User blocked successfully',
+    };
+  }
+
+  async unblockFriend(userId: string, friendId: string) {
+    if (userId === friendId) {
+      throw new BadRequestException('Invalid friend identifier');
+    }
+
+    const friendship = await this.findFriendshipRecord(userId, friendId);
+    if (!friendship || friendship.status !== FriendshipStatus.BLOCKED) {
+      throw new NotFoundException('Blocked relationship not found');
+    }
+
+    await this.friendshipRepo.remove(friendship);
+
+    return {
+      success: true,
+      message: 'User unblocked successfully',
+    };
   }
 }
