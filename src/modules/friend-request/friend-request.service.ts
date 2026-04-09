@@ -91,6 +91,17 @@ export class FriendRequestService {
     });
   }
 
+  async getOutgoing(userId: string): Promise<FriendRequest[]> {
+    return this.requestRepo.find({
+      where: {
+        sender: { userId },
+        status: FriendRequestStatus.PENDING,
+      },
+      relations: ['receiver'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async acceptRequest(requestId: string, userId: string) {
     const request = await this.requestRepo.findOne({
       where: { requestId },
