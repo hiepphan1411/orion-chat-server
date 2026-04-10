@@ -10,6 +10,8 @@ import { ConversationParticipant } from './entities/conversation-participant.ent
 import { GroupConversation } from './entities/group-conversation.entity';
 
 import { Message, MessageSchema } from '../message/message.schema';
+import { MessageModule } from '../message/message.module';
+import { User } from '../users/entities/user.entity';
 
 @Module({
   imports: [
@@ -17,8 +19,10 @@ import { Message, MessageSchema } from '../message/message.schema';
       Conversation,
       ConversationParticipant,
       GroupConversation,
+      User,
     ]),
     MongooseModule.forFeature([{ name: Message.name, schema: MessageSchema }]),
+    MessageModule,
   ],
   controllers: [ConversationController],
   providers: [ConversationService],

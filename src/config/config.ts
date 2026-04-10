@@ -8,7 +8,16 @@ export default () => ({
     database: process.env.DB_NAME || 'orion_chat',
   },
   mongodb: {
-    uri: process.env.MONGO_URL || 'mongodb://localhost:27017/orion_chat',
+    uri: process.env.MONGO_URI,
+  },
+  aws: {
+    region: process.env.AWS_REGION || 'ap-southeast-1',
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    s3Bucket: process.env.AWS_S3_BUCKET,
+    s3PublicBaseUrl: process.env.AWS_S3_PUBLIC_BASE_URL,
+    // s3Endpoint: process.env.AWS_S3_ENDPOINT,
+    s3ForcePathStyle: process.env.AWS_S3_FORCE_PATH_STYLE === 'true',
   },
   esms: {
     apiKey: process.env.ESMS_API_KEY,

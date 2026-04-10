@@ -67,6 +67,7 @@ import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
 import { Conversation } from './modules/conversation/entities/conversation.schema';
+import { ConversationModule } from './modules/conversation/conversation.module';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
@@ -171,6 +172,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
     TaskBoardModule,
     BoardColumnModule,
     LabelModule,
+    ConversationModule,
     SubTaskModule,
     CommentModule,
     ActivityLogModule,

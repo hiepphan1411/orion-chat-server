@@ -25,10 +25,28 @@ export class Message {
   @Prop({ default: false })
   isDeleted: boolean;
 
+  @Prop({ type: [String], default: [] })
+  deletedForUsers: string[];
+
+  @Prop({ default: false })
+  isRevoked: boolean;
+
+  @Prop({ default: null })
+  revokedBy?: string;
+
+  @Prop({ default: null })
+  revokedAt?: Date;
+
   @Prop({ default: null })
   replyToMessageId?: string;
 
+  @Prop({ default: null })
+  forwardedFromMessageId?: string;
+
   @Prop({ required: true })
+  // NOTE: senderBy must ALWAYS be userId (UUID), NEVER phoneNumber
+  // This is used to match against User.userId in PostgreSQL
+  // Frontend: Use senderBy === currentUser.userId to determine message ownership
   senderBy: string;
 
   @Prop({ required: true })
@@ -49,6 +67,18 @@ export class Message {
   seenBy: Array<{ userId: string; seenAt: Date }>;
 
   @Prop({
+    type: [
+      {
+        userId: { type: String, required: true },
+        emoji: { type: String, required: true },
+        reactedAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+  })
+  reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
+
+  @Prop({
     type: String,
     enum: MessageType,
     default: MessageType.TEXT,
@@ -61,6 +91,12 @@ export class Message {
     default: MessageStatus.SENT,
   })
   messageStatus: MessageStatus;
+
+  @Prop({ type: Date, default: () => new Date() })
+  createdAt: Date;
+
+  @Prop({ type: Date, default: () => new Date() })
+  updatedAt: Date;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
