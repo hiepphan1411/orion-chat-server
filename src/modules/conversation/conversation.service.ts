@@ -214,7 +214,7 @@ export class ConversationService {
       throw new NotFoundException(`Recipient not found: ${recipientId}`);
     }
 
-    // ✅ Try to find existing PRIVATE conversation
+    // ✅ Try to find existing PRIVATE conversation between currentUserId and recipientId
     const existingConversations = await this.participantRepo.find({
       where: { userId: currentUserId },
       relations: ['conversation', 'conversation.participants'],
@@ -226,26 +226,19 @@ export class ConversationService {
       // ✅ Must be PRIVATE type
       if (conversation.type !== ConversationType.PRIVATE) return false;
 
-      // ✅ Check if other participant is recipientId
-      return conversation.participants.length === 2;
+      // ✅ Must have exactly 2 participants
+      if (conversation.participants.length !== 2) return false;
+
+      // ✅ Check if recipientId is the other participant
+      return conversation.participants.some((p) => p.userId === recipientId);
     });
 
     if (existingPrivate) {
-      // ✅ Verify the other participant is recipientId
-      const otherParticipantExists = await this.participantRepo.findOne({
-        where: {
-          conversationId: existingPrivate.conversation.conversationId,
-          userId: recipientId,
-        },
-      });
-
-      if (otherParticipantExists) {
-        // ✅ Return existing conversation detail
-        return this.findDetailById(
-          existingPrivate.conversation.conversationId,
-          currentUserId,
-        );
-      }
+      // ✅ Return existing conversation detail
+      return this.findDetailById(
+        existingPrivate.conversation.conversationId,
+        currentUserId,
+      );
     }
 
     // ✅ Create NEW private conversation
