@@ -124,7 +124,11 @@ export class ConversationService {
         'conversation.participants',
         'conversation.participants.user',
       ],
-      order: { conversation: { createdAt: 'DESC' } },
+      order: {
+        isPinned: 'DESC',
+        pinnedAt: 'DESC',
+        conversation: { createdAt: 'DESC' },
+      },
     });
 
     if (memberships.length === 0) return [];
@@ -194,9 +198,7 @@ export class ConversationService {
     }
 
     if (currentUserId === recipientId) {
-      throw new BadRequestException(
-        'Cannot create conversation with yourself',
-      );
+      throw new BadRequestException('Cannot create conversation with yourself');
     }
 
     // Validate UUIDs
@@ -215,7 +217,7 @@ export class ConversationService {
     // ✅ Try to find existing PRIVATE conversation
     const existingConversations = await this.participantRepo.find({
       where: { userId: currentUserId },
-      relations: ['conversation'],
+      relations: ['conversation', 'conversation.participants'],
     });
 
     const existingPrivate = existingConversations.find((conv) => {
@@ -266,7 +268,10 @@ export class ConversationService {
 
     // ✅ Return conversation detail with block status
     const membership = await this.participantRepo.findOne({
-      where: { conversationId: savedConversation.conversationId, userId: currentUserId },
+      where: {
+        conversationId: savedConversation.conversationId,
+        userId: currentUserId,
+      },
       relations: [
         'conversation',
         'conversation.participants',
@@ -743,6 +748,9 @@ export class ConversationService {
       // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
       canUnblock:
         blockStatus?.isBlocked && blockStatus?.blockedBy === membership.userId,
+      // ==================== Pin Status ====================
+      myIsPinned: membership.isPinned,
+      myPinnedAt: membership.pinnedAt,
       // Danh sách participants
       participants: c.participants.map((p) => ({
         userId: p.userId,
@@ -1142,6 +1150,75 @@ export class ConversationService {
       conversationId,
       unblockedUserId: targetUserId,
       message: `User ${targetUserId} has been unblocked`,
+    };
+  }
+
+  // ==================== Pin Conversation ====================
+
+  /**
+   * Ghim cuộc hội thoại lên đầu danh sách
+   * Cuộc hội thoại được ghim sau sẽ hiển thị trên
+   * @param conversationId ID của cuộc hội thoại
+   * @param userId ID của user hiện tại
+   */
+  async pinConversation(conversationId: string, userId: string) {
+    // Verify membership
+    const membership = await this.requireMembership(conversationId, userId);
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Check if already pinned
+    if (membership.isPinned) {
+      throw new BadRequestException('This conversation is already pinned');
+    }
+
+    // Update the conversation participant to pin it with current timestamp
+    const now = new Date();
+    await this.participantRepo.update(
+      { conversationId, userId },
+      { isPinned: true, pinnedAt: now },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      isPinned: true,
+      pinnedAt: now,
+      message: 'Conversation pinned successfully',
+    };
+  }
+
+  /**
+   * Bỏ ghim cuộc hội thoại
+   * @param conversationId ID của cuộc hội thoại
+   * @param userId ID của user hiện tại
+   */
+  async unpinConversation(conversationId: string, userId: string) {
+    // Verify membership
+    const membership = await this.requireMembership(conversationId, userId);
+
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Check if already unpinned
+    if (!membership.isPinned) {
+      throw new BadRequestException('This conversation is not pinned');
+    }
+
+    // Update the conversation participant to unpin it
+    await this.participantRepo.update(
+      { conversationId, userId },
+      { isPinned: false, pinnedAt: null },
+    );
+
+    return {
+      success: true,
+      conversationId,
+      isPinned: false,
+      message: 'Conversation unpinned successfully',
     };
   }
 }

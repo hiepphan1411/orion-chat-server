@@ -486,4 +486,45 @@ export class ConversationController {
         blockStatus.isBlocked && blockStatus.blockedBy === user.userId,
     };
   }
+
+  // ==================== PIN CONVERSATION ====================
+
+  /**
+   * Ghim cuộc hội thoại lên đầu danh sách
+   * Cuộc hội thoại được ghim sau sẽ hiển thị trên (dựa theo pinnedAt timestamp)
+   * @route POST /conversations/:conversationId/pin
+   */
+  @Post(':conversationId/pin')
+  async pinConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.pinConversation(
+      conversationId,
+      user.userId,
+    );
+  }
+
+  /**
+   * Bỏ ghim cuộc hội thoại
+   * @route POST /conversations/:conversationId/unpin
+   */
+  @Post(':conversationId/unpin')
+  async unpinConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.unpinConversation(
+      conversationId,
+      user.userId,
+    );
+  }
 }

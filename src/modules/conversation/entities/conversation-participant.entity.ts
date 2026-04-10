@@ -66,4 +66,14 @@ export class ConversationParticipant {
   // Thời gian khi người dùng bị chặn
   @Column({ type: 'timestamp', nullable: true })
   blockedAt: Date | null;
+
+  // ==================== Pin Conversation ====================
+
+  // Ghim cuộc hội thoại: nếu true, cuộc hội thoại sẽ được hiển thị ở đầu danh sách
+  @Column({ type: 'boolean', default: false })
+  isPinned: boolean;
+
+  // Thời gian khi cuộc hội thoại được ghim (dùng để sắp xếp, cuộc nào ghim sau sẽ hiển thị trên)
+  @Column({ type: 'timestamp', nullable: true })
+  pinnedAt: Date | null;
 }
