@@ -10,6 +10,7 @@ import {
   Delete,
   Patch,
   NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ConversationService } from './conversation.service';
 import type { JwtPayload } from 'jsonwebtoken';
@@ -38,9 +39,40 @@ export class ConversationController {
     if (!user?.userId) throw new BadRequestException('User ID is required');
     return this.conversationService.findAllByUserId(user.userId);
   }
+
+  /**
+   * Get or create a PRIVATE conversation with a friend
+   * @route POST /conversations/private
+   * @param recipientId ID của friend
+   */
+  @Post('private')
+  async getOrCreatePrivateConversation(
+    @CurrentUser() user: JwtPayload,
+    @Body('recipientId') recipientId: string,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!recipientId) {
+      throw new BadRequestException('recipientId is required');
+    }
+
+    try {
+      return await this.conversationService.getOrCreatePrivateConversation(
+        user.userId,
+        recipientId,
+      );
+    } catch (error) {
+      console.error('=== ERROR getOrCreatePrivateConversation ===');
+      console.error(error);
+      throw error;
+    }
+  }
+
   @Get(':conversationId')
   async getConversationDetail(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.userId) {
@@ -60,7 +92,7 @@ export class ConversationController {
 
   @Get(':conversationId/messages')
   async getConversationMessages(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
@@ -84,7 +116,7 @@ export class ConversationController {
 
   @Post(':conversationId/messages')
   async createConversationMessage(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Body()
     body: {
@@ -132,7 +164,7 @@ export class ConversationController {
   // ==================== Message Reactions ====================
   @Post(':conversationId/messages/:messageId/reactions')
   async reactToMessage(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: JwtPayload,
     @Body() body: { emoji: string },
@@ -165,7 +197,7 @@ export class ConversationController {
 
   @Delete(':conversationId/messages/:messageId/reactions')
   async removeReaction(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: JwtPayload,
   ) {
@@ -193,7 +225,7 @@ export class ConversationController {
   // ==================== Message Recall ====================
   @Post(':conversationId/messages/:messageId/recall')
   async recallMessage(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: JwtPayload,
   ) {
@@ -220,7 +252,7 @@ export class ConversationController {
   // ==================== Message Delete ====================
   @Delete(':conversationId/messages/:messageId')
   async deleteMessage(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Param('messageId') messageId: string,
     @CurrentUser() user: JwtPayload,
   ) {
@@ -240,7 +272,7 @@ export class ConversationController {
   // ==================== Message Forward ====================
   @Post(':conversationId/messages/forward')
   async forwardMessage(
-    @Param('conversationId') targetConversationId: string,
+    @Param('conversationId', ParseUUIDPipe) targetConversationId: string,
     @CurrentUser() user: JwtPayload,
     @Body()
     body: {
@@ -286,7 +318,7 @@ export class ConversationController {
    */
   @Patch(':conversationId/auto-delete-duration')
   async updateAutoDeleteDuration(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdateAutoDeleteDTO,
   ) {
@@ -307,7 +339,7 @@ export class ConversationController {
    */
   @Post(':conversationId/hide')
   async hideConversation(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: HideConversationDTO,
   ) {
@@ -328,7 +360,7 @@ export class ConversationController {
    */
   @Post(':conversationId/reveal')
   async revealConversation(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
     @Body() dto: RevealConversationDTO,
   ) {
@@ -349,7 +381,7 @@ export class ConversationController {
    */
   @Post(':conversationId/clear-history')
   async clearChatHistory(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.userId) {
@@ -371,7 +403,7 @@ export class ConversationController {
    */
   @Post(':conversationId/block')
   async blockUser(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.userId) {
@@ -392,7 +424,7 @@ export class ConversationController {
    */
   @Post(':conversationId/unblock')
   async unblockUser(
-    @Param('conversationId') conversationId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.userId) {

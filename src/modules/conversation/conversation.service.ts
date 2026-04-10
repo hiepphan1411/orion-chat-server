@@ -50,6 +50,50 @@ type ConversationMessagesResult = {
   nextCursor: string | null;
 };
 
+type ConversationView = {
+  conversationId: string;
+  type: string;
+  autoDeleteDuration: number;
+  createdAt: Date;
+  myRole: string;
+  myJoinedAt: Date;
+  myIsHidden: boolean;
+  myIsBlocked?: boolean;
+  myBlockedAt?: Date | null;
+  myBlockedBy?: string | null;
+  lastMessage: {
+    content?: string;
+    messageType?: string;
+    senderBy?: string;
+    createdAt?: Date | string;
+    messageStatus?: string;
+  } | null;
+  groupInfo: {
+    groupName: string;
+    groupAvatar?: string;
+    ownerId: string;
+  } | null;
+  blockStatus: {
+    isBlocked: boolean;
+    blockedUserId: string | null;
+    blockedBy: string | null;
+    blockedAt: Date | null;
+  };
+  canUnblock?: boolean;
+  participants: Array<{
+    userId: string;
+    fullName: string | null;
+    avatarUrl: string | null;
+    role: any;
+    joinedAt: Date;
+    lastReadMessageId: string | null;
+    isHidden: boolean;
+    isBlocked: boolean;
+    blockedAt: Date | null;
+    blockedBy: string | null;
+  }>;
+};
+
 type CreateConversationMessagePayload = {
   senderBy: string;
   content: string;
@@ -131,6 +175,114 @@ export class ConversationService {
     const blockStatus = await this.getConversationBlockStatus(conversationId);
 
     return this.toConversationView(membership, latestMsg, blockStatus);
+  }
+
+  /**
+   * Lấy hoặc tạo PRIVATE conversation giữa current user và recipient
+   * @param currentUserId ID của user hiện tại
+   * @param recipientId ID của recipient
+   * @returns Conversation view hoặc null nếu recipient không tồn tại
+   */
+  async getOrCreatePrivateConversation(
+    currentUserId: string,
+    recipientId: string,
+  ): Promise<ConversationView | null> {
+    if (!currentUserId || !recipientId) {
+      throw new BadRequestException(
+        'currentUserId and recipientId are required',
+      );
+    }
+
+    if (currentUserId === recipientId) {
+      throw new BadRequestException(
+        'Cannot create conversation with yourself',
+      );
+    }
+
+    // Validate UUIDs
+    this.validateUUID(currentUserId, 'currentUserId');
+    this.validateUUID(recipientId, 'recipientId');
+
+    // ✅ Check if recipient exists
+    const recipient = await this.userRepo.findOne({
+      where: { userId: recipientId },
+    });
+
+    if (!recipient) {
+      throw new NotFoundException(`Recipient not found: ${recipientId}`);
+    }
+
+    // ✅ Try to find existing PRIVATE conversation
+    const existingConversations = await this.participantRepo.find({
+      where: { userId: currentUserId },
+      relations: ['conversation'],
+    });
+
+    const existingPrivate = existingConversations.find((conv) => {
+      const conversation = conv.conversation;
+
+      // ✅ Must be PRIVATE type
+      if (conversation.type !== ConversationType.PRIVATE) return false;
+
+      // ✅ Check if other participant is recipientId
+      return conversation.participants.length === 2;
+    });
+
+    if (existingPrivate) {
+      // ✅ Verify the other participant is recipientId
+      const otherParticipantExists = await this.participantRepo.findOne({
+        where: {
+          conversationId: existingPrivate.conversation.conversationId,
+          userId: recipientId,
+        },
+      });
+
+      if (otherParticipantExists) {
+        // ✅ Return existing conversation detail
+        return this.findDetailById(
+          existingPrivate.conversation.conversationId,
+          currentUserId,
+        );
+      }
+    }
+
+    // ✅ Create NEW private conversation
+    const newConversation = this.conversationRepo.create({
+      type: ConversationType.PRIVATE,
+    });
+    const savedConversation = await this.conversationRepo.save(newConversation);
+
+    // ✅ Add participants
+    await this.participantRepo.save([
+      {
+        conversationId: savedConversation.conversationId,
+        userId: currentUserId,
+      },
+      {
+        conversationId: savedConversation.conversationId,
+        userId: recipientId,
+      },
+    ]);
+
+    // ✅ Return conversation detail with block status
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId: savedConversation.conversationId, userId: currentUserId },
+      relations: [
+        'conversation',
+        'conversation.participants',
+        'conversation.participants.user',
+      ],
+    });
+
+    if (!membership) {
+      throw new Error('Failed to create conversation');
+    }
+
+    const blockStatus = await this.getConversationBlockStatus(
+      savedConversation.conversationId,
+    );
+
+    return this.toConversationView(membership, null, blockStatus);
   }
 
   async getMessagesByConversation(
@@ -222,7 +374,19 @@ export class ConversationService {
     return MessageType.TEXT;
   }
 
+  private validateUUID(id: string, fieldName: string): void {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      throw new BadRequestException(`Invalid ${fieldName}: ${id}`);
+    }
+  }
+
   private async requireMembership(conversationId: string, userId: string) {
+    // Validate UUIDs before database query
+    this.validateUUID(conversationId, 'conversationId');
+    this.validateUUID(userId, 'userId');
+
     const membership = await this.participantRepo.findOne({
       where: { conversationId, userId },
       relations: [
