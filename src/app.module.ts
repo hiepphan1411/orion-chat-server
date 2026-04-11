@@ -72,14 +72,29 @@ import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
+<<<<<<< Updated upstream
+=======
+import { UsersModule } from './modules/users/users.module';
+import { UserSettingsModule } from './modules/user-settings/user-settings.module';
+import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
+import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
+import { UserDevicesModule } from './modules/user-devices/user-devices.module';
+import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
+import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
+import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
+import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
+import { HealthController } from './health.controller';
+>>>>>>> Stashed changes
 
 @Module({
+  controllers: [HealthController],
   imports: [
     // ENV config
     ConfigModule.forRoot({
       isGlobal: true,
     }),
 
+<<<<<<< Updated upstream
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: 'localhost',
@@ -126,6 +141,63 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
       ],
       autoLoadEntities: true,
       synchronize: true,
+=======
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        host: configService.get<string>('DB_HOST', 'localhost'),
+        port: Number(configService.get<string>('DB_PORT', '5432')),
+        username: configService.get<string>('DB_USER', 'postgres'),
+        password: configService.get<string>('DB_PASSWORD', ''),
+        database: configService.get<string>('DB_NAME', 'orion_chat'),
+        entities: [
+          User,
+          Task,
+          TaskAssignee,
+          TaskBoard,
+          TaskList,
+          Workspace,
+          WorkspaceMember,
+          BoardColumn,
+          Label,
+          Report,
+          Admin,
+          Conversation,
+          ConversationParticipant,
+          SubTask,
+          Comment,
+          Attachment,
+          ActivityLog,
+          PersonalNote,
+          NoteCategory,
+          FriendRequest,
+          Friendship,
+          GroupConversation,
+          GroupMember,
+          GroupInvite,
+          CalendarEvent,
+          CalendarEventParticipant,
+          AutomationRule,
+          Document,
+          DocumentVersion,
+          InlineComment,
+          WorkspaceFile,
+          Goal,
+          KeyResult,
+          Sprint,
+          Epic,
+          Milestone,
+          UserSettings,
+          NotificationSettings,
+          PrivacySettings,
+          UserDevices,
+        ],
+        autoLoadEntities: true,
+        synchronize:
+          configService.get<string>('TYPEORM_SYNC', 'false') === 'true',
+      }),
+>>>>>>> Stashed changes
     }),
 
     // MongoDB - Using environment variable
@@ -134,6 +206,7 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
       useFactory: (configService: ConfigService) => ({
         uri:
           configService.get<string>('MONGO_URI') ||
+          configService.get<string>('MONGO_URL') ||
           'mongodb://localhost:27017/orion_chat',
       }),
     }),

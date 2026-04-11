@@ -11,9 +11,16 @@ import { Server, Socket } from 'socket.io';
 
 const onlineUsers = new Map<string, string>();
 
+const socketAllowedOrigins = (
+  process.env.SOCKET_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: socketAllowedOrigins.length > 0 ? socketAllowedOrigins : true,
   },
   namespace: '/presence',
 })

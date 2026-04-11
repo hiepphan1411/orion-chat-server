@@ -24,9 +24,20 @@ import { CallDocument } from './call.schema';
 const onlineUsers = new Map<string, string>(); // userId -> socketId
 const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId},
 
+const socketAllowedOrigins = (
+  process.env.SOCKET_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
 @WebSocketGateway({
   cors: {
+<<<<<<< Updated upstream
     origin: '*', // trong production nên specify domain cụ thể
+=======
+    origin: socketAllowedOrigins.length > 0 ? socketAllowedOrigins : true,
+>>>>>>> Stashed changes
   },
   namespace: '/call', // namespace riêng cho call
 })
