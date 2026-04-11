@@ -1,5 +1,8 @@
 import { DataSource, In, Repository } from 'typeorm';
-import { Conversation } from 'src/modules/conversation/entities/conversation.entity';
+import {
+  Conversation,
+  ConversationType,
+} from 'src/modules/conversation/entities/conversation.schema';
 import { Admin } from 'src/modules/admin/entities/admin.entity';
 import { File } from 'src/modules/file/entities/file.entity';
 import {
@@ -10,7 +13,7 @@ import {
   Friendship,
   FriendshipStatus,
 } from 'src/modules/friendship/entities/friendship.entity';
-import { GroupConversation } from 'src/modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from '../modules/conversation/entities/group-conversation.entity';
 import {
   GroupInvite,
   GroupInviteStatus,
@@ -110,6 +113,7 @@ async function clearPreviousSeedData(
   friendRequestRepo: Repository<FriendRequest>,
   groupMemberRepo: Repository<GroupMember>,
   groupInviteRepo: Repository<GroupInvite>,
+  conversationRepo: Repository<Conversation>,
   groupRepo: Repository<GroupConversation>,
 ) {
   const seedPhoneNumbers = seedUsers.map((u) => u.phoneNumber);
@@ -146,13 +150,16 @@ async function clearPreviousSeedData(
   });
 
   if (seedGroups.length) {
+    const seedConversationIds = seedGroups.map((g) => g.conversationId);
+
     await groupInviteRepo.delete({
-      group: { conversationId: In(seedGroups.map((g) => g.conversationId)) },
+      group: { conversationId: In(seedConversationIds) },
     });
     await groupMemberRepo.delete({
-      group: { conversationId: In(seedGroups.map((g) => g.conversationId)) },
+      group: { conversationId: In(seedConversationIds) },
     });
-    await groupRepo.delete(seedGroups.map((g) => g.conversationId));
+    await groupRepo.delete(seedConversationIds);
+    await conversationRepo.delete(seedConversationIds);
   }
 
   await userRepo.delete({ userId: In(userIds) });
@@ -164,6 +171,7 @@ async function seed() {
   const userRepo = dataSource.getRepository(User);
   const friendshipRepo = dataSource.getRepository(Friendship);
   const friendRequestRepo = dataSource.getRepository(FriendRequest);
+  const conversationRepo = dataSource.getRepository(Conversation);
   const groupRepo = dataSource.getRepository(GroupConversation);
   const groupMemberRepo = dataSource.getRepository(GroupMember);
   const groupInviteRepo = dataSource.getRepository(GroupInvite);
@@ -175,6 +183,7 @@ async function seed() {
       friendRequestRepo,
       groupMemberRepo,
       groupInviteRepo,
+      conversationRepo,
       groupRepo,
     );
 
@@ -226,21 +235,37 @@ async function seed() {
       }),
     ]);
 
+    const group1Conversation = await conversationRepo.save(
+      conversationRepo.create({
+        type: ConversationType.GROUP,
+      }),
+    );
+
     const group1 = await groupRepo.save(
       groupRepo.create({
+        conversationId: group1Conversation.conversationId,
+        conversation: group1Conversation,
         groupName: 'Orion React Community',
         groupAvatar: 'https://picsum.photos/seed/orion-react/200/200',
-        createdAt: new Date(),
-        lastMessageId: 'seed-msg-001',
+        ownerId: userMap.u2.userId,
+        owner: userMap.u2,
+      }),
+    );
+
+    const group2Conversation = await conversationRepo.save(
+      conversationRepo.create({
+        type: ConversationType.GROUP,
       }),
     );
 
     const group2 = await groupRepo.save(
       groupRepo.create({
+        conversationId: group2Conversation.conversationId,
+        conversation: group2Conversation,
         groupName: 'UI Motion Club',
         groupAvatar: 'https://picsum.photos/seed/ui-motion/200/200',
-        createdAt: new Date(),
-        lastMessageId: 'seed-msg-002',
+        ownerId: userMap.u4.userId,
+        owner: userMap.u4,
       }),
     );
 

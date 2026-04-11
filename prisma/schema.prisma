@@ -1,0 +1,773 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model activity_log {
+  activityId  String   @id(map: "PK_557203b3713859f55bb58f67228") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  action      String   @db.VarChar
+  description String
+  metadata    Json?
+  timestamp   DateTime @default(now()) @db.Timestamp(6)
+  taskTaskId  String?  @db.Uuid
+  userUserId  String?  @db.Uuid
+  task        task?    @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_0083d425d3037afa051b1e29dc8")
+  user        user?    @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_1fd2c19e47ccc724ce8805ef908")
+}
+
+model admin {
+  adminId String   @id(map: "PK_abce4cc3fe598f242ab45e529b6") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  report  report[]
+}
+
+model attachment {
+  attachmentId     String   @id(map: "PK_cf97a2ecc8e50c280cab25ea5e0") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  fileName         String   @db.VarChar
+  fileUrl          String   @db.VarChar
+  fileType         String   @db.VarChar
+  fileSize         Int
+  uploadedAt       DateTime @default(now()) @db.Timestamp(6)
+  taskTaskId       String?  @db.Uuid
+  uploadedByUserId String?  @db.Uuid
+  task             task?    @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_12f2ecd0395f301ac0a778b24c7")
+  user             user?    @relation(fields: [uploadedByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_991cf0a66ffbf3d8ef36e5dc010")
+}
+
+model automation_rule {
+  ruleId               String     @id(map: "PK_e0e382808eea2b2d52175263191") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name                 String     @db.VarChar
+  description          String?
+  isEnabled            Boolean    @default(true)
+  trigger              Json
+  conditions           Json?
+  action               Json
+  triggerCount         Int        @default(0)
+  lastTriggered        DateTime?  @db.Timestamp(6)
+  createdAt            DateTime   @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime   @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?    @db.Uuid
+  createdByUserId      String?    @db.Uuid
+  workspace            workspace? @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_1e50403973b5d5237dada739afe")
+  user                 user?      @relation(fields: [createdByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_634c9e58b7ebeac800b30cf802e")
+}
+
+model board_column {
+  columnId     String                   @id(map: "PK_b4998ae27b61758fe4e19f2de00") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name         String                   @db.VarChar
+  status       board_column_status_enum
+  color        String                   @default("#94a3b8") @db.VarChar
+  order        Int
+  taskLimit    Int?
+  boardBoardId String?                  @db.Uuid
+  task_board   task_board?              @relation(fields: [boardBoardId], references: [boardId], onDelete: Cascade, onUpdate: NoAction, map: "FK_d68e52ffa4ea51b4e0c47eedbd7")
+  task         task[]
+}
+
+model calendar_event {
+  eventId                    String                         @id(map: "PK_54456699e918ae17080335406a0") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title                      String                         @db.VarChar
+  description                String                         @default("") @db.VarChar
+  createdAt                  DateTime                       @default(now()) @db.Timestamp(6)
+  color                      String                         @default("#008080") @db.VarChar
+  location                   String                         @default("") @db.VarChar
+  category                   calendar_event_category_enum   @default(personal)
+  recurrence                 calendar_event_recurrence_enum @default(none)
+  notificationMinutes        Int                            @default(30)
+  isAllDay                   Boolean                        @default(false)
+  updatedAt                  DateTime                       @default(now()) @db.Timestamp(6)
+  ownerUserId                String?                        @db.Uuid
+  startTime                  DateTime                       @db.Timestamptz(6)
+  endTime                    DateTime                       @db.Timestamptz(6)
+  user                       user?                          @relation(fields: [ownerUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_bacaaab169685e2ad36da6dc4fa")
+  calendar_event_participant calendar_event_participant[]
+  reminder                   reminder[]
+}
+
+model calendar_event_participant {
+  participantId       String                               @id(map: "PK_754fec925ebe0da0ddaf9ef873c") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  type                calendar_event_participant_type_enum
+  displayName         String                               @db.VarChar
+  avatarUrl           String?                              @db.VarChar
+  eventEventId        String?                              @db.Uuid
+  userUserId          String?                              @db.Uuid
+  groupConversationId String?                              @db.Uuid
+  user                user?                                @relation(fields: [userUserId], references: [userId], onUpdate: NoAction, map: "FK_2dac890477acc9cde9a57573fb1")
+  calendar_event      calendar_event?                      @relation(fields: [eventEventId], references: [eventId], onDelete: Cascade, onUpdate: NoAction, map: "FK_ab0bacdff02e7ec3770d64151b8")
+  group_conversation  group_conversation?                  @relation(fields: [groupConversationId], references: [conversationId], onUpdate: NoAction, map: "FK_c980079e865e0f984697fd761e6")
+}
+
+model channel {
+  channelId            String            @id(map: "PK_ce6adfd740251275f50001afe68") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  channelName          String            @db.VarChar
+  description          String            @db.VarChar
+  type                 channel_type_enum
+  isPrivate            Boolean           @default(false)
+  createdAt            DateTime          @db.Timestamp(6)
+  workspaceWorkspaceId String?           @db.Uuid
+  workspace            workspace?        @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: NoAction, onUpdate: NoAction, map: "FK_0c912bda9df737af5cceee00643")
+}
+
+model comment {
+  commentId    String   @id(map: "PK_1b03586f7af11eac99f4fdbf012") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  content      String
+  createdAt    DateTime @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @db.Timestamp(6)
+  taskTaskId   String?  @db.Uuid
+  authorUserId String?  @db.Uuid
+  user         user?    @relation(fields: [authorUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_4281174f108641dbdbe8ec124c2")
+  task         task?    @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_dc8cb2f0561bc6f09902a1dc88d")
+}
+
+model contact {
+  id          String  @id(map: "PK_2cbbe00f59ab6b3bb5b8d19f989") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  phoneNumber String  @db.VarChar
+  name        String  @db.VarChar
+  isBlocked   Boolean @default(false)
+  userUserId  String? @db.Uuid
+  user        user?   @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_b7c1b2cddce3cf412fc8bf6562d")
+}
+
+model conversation {
+  conversationId            String                      @id(map: "PK_03a1f787084f38eabbeb1c8dfcb") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  createdAt                 DateTime                    @default(now()) @db.Timestamp(6)
+  autoDeleteDuration        Int                         @default(0)
+  type                      conversation_type_enum
+  conversation_participants conversation_participants[]
+  group_conversation        group_conversation?
+  report                    report[]
+
+  @@index([type], map: "IDX_cac593c4d9dcdf0119c92f7c8d")
+}
+
+model conversation_participants {
+  conversationId    String                              @db.Uuid
+  userId            String                              @db.Uuid
+  role              conversation_participants_role_enum @default(member)
+  joinedAt          DateTime                            @default(now()) @db.Timestamp(6)
+  lastReadMessageId String?                             @db.VarChar
+  user              user                                @relation(fields: [userId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_18c4ba3b127461649e5f5039dbf")
+  conversation      conversation                        @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_4453e20858b14ab765a09ad728c")
+
+  @@id([conversationId, userId], map: "PK_e43efbfa3b850160b5b2c50e3ec")
+  @@unique([conversationId, userId], map: "IDX_e43efbfa3b850160b5b2c50e3e")
+}
+
+model document {
+  documentId                             String             @id(map: "PK_bc7792f4f4dac1e5242b8365e3f") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title                                  String             @db.VarChar
+  content                                String             @default("")
+  isFavorite                             Boolean            @default(false)
+  viewCount                              Int                @default(0)
+  createdAt                              DateTime           @default(now()) @db.Timestamp(6)
+  updatedAt                              DateTime           @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId                   String?            @db.Uuid
+  createdByUserId                        String?            @db.Uuid
+  lastEditedByUserId                     String?            @db.Uuid
+  user_document_lastEditedByUserIdTouser user?              @relation("document_lastEditedByUserIdTouser", fields: [lastEditedByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_0777244eec97b88ad85e0275d9a")
+  user_document_createdByUserIdTouser    user?              @relation("document_createdByUserIdTouser", fields: [createdByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_8c3f23b3e8255bb1f8de9e8a8ae")
+  workspace                              workspace?         @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_e752b9931da1d3c0fcc1a8e33f5")
+  document_version                       document_version[]
+  inline_comment                         inline_comment[]
+}
+
+model document_version {
+  versionId          String    @id(map: "PK_b355093b1f2153c08b4cfa41833") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name               String?   @db.VarChar
+  content            String
+  createdAt          DateTime  @default(now()) @db.Timestamp(6)
+  documentDocumentId String?   @db.Uuid
+  editedByUserId     String?   @db.Uuid
+  user               user?     @relation(fields: [editedByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_14fae4b40551de58e9372ba2949")
+  document           document? @relation(fields: [documentDocumentId], references: [documentId], onDelete: Cascade, onUpdate: NoAction, map: "FK_94eb03bbb43b4a0c2c9b7bf5f05")
+}
+
+model epic {
+  epicId               String      @id(map: "PK_ea858eeb544cd5bbcc80450a700") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title                String      @db.VarChar
+  description          String?
+  status               String      @default("planned") @db.VarChar
+  color                String      @default("#3b82f6") @db.VarChar
+  progress             Int         @default(0)
+  startDate            DateTime?   @db.Date
+  endDate              DateTime?   @db.Date
+  createdAt            DateTime    @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime    @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?     @db.Uuid
+  ownerUserId          String?     @db.Uuid
+  boardBoardId         String?     @db.Uuid
+  workspace            workspace?  @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_06a9f5c8ea2a955756c98db6bd1")
+  user                 user?       @relation(fields: [ownerUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_0b3c4c239abf678047857001a95")
+  task_board           task_board? @relation(fields: [boardBoardId], references: [boardId], onUpdate: NoAction, map: "FK_834a785bdfe405be9c3826e9265")
+}
+
+model file {
+  fileId     String      @id(map: "PK_f620cbf511fcf9b5970d187fdca") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  fileName   String      @db.VarChar
+  fileUrl    String      @db.VarChar
+  fileType   String      @db.VarChar
+  fileSize   Int
+  uploadAt   DateTime    @db.Timestamp(6)
+  folderPath String      @db.VarChar
+  bucketName String      @db.VarChar
+  region     String      @db.VarChar
+  user       user[]
+  workspace  workspace[]
+}
+
+model friend_request {
+  requestId                                String                     @id(map: "PK_37f06483cb0b2fafcfcf750a3bf") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  createdAt                                DateTime                   @default(now()) @db.Timestamp(6)
+  senderUserId                             String?                    @db.Uuid
+  receiverUserId                           String?                    @db.Uuid
+  respondedAt                              DateTime?                  @db.Timestamp(6)
+  status                                   friend_request_status_enum @default(pending)
+  user_friend_request_receiverUserIdTouser user?                      @relation("friend_request_receiverUserIdTouser", fields: [receiverUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_0d421a9a17dab5bb653b1dbcc53")
+  user_friend_request_senderUserIdTouser   user?                      @relation("friend_request_senderUserIdTouser", fields: [senderUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_b387088f13b068e4f4e76f328ad")
+
+  @@index([senderUserId, receiverUserId, status], map: "IDX_682cbd8af5a89b10611b6d1653")
+}
+
+model friendship {
+  friendshipId                        String                 @id(map: "PK_cb890aaf8c0acc4072704f1ae6b") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  status                              friendship_status_enum @default(active)
+  createdAt                           DateTime               @default(now()) @db.Timestamp(6)
+  userOneUserId                       String?                @db.Uuid
+  userTwoUserId                       String?                @db.Uuid
+  user_friendship_userTwoUserIdTouser user?                  @relation("friendship_userTwoUserIdTouser", fields: [userTwoUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_116b17fb0e2320ec50ddc4efd87")
+  user_friendship_userOneUserIdTouser user?                  @relation("friendship_userOneUserIdTouser", fields: [userOneUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_a47f8410c9d2d3c57c20e0cac8a")
+
+  @@unique([userOneUserId, userTwoUserId], map: "IDX_d10cb17a1cbc75d3ce62440013")
+}
+
+model goal {
+  goalId               String       @id(map: "PK_c8c12c39fac22bc09134d9efddd") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title                String       @db.VarChar
+  description          String?
+  status               String       @default("on_track") @db.VarChar
+  progress             Int          @default(0)
+  startDate            DateTime?    @db.Date
+  endDate              DateTime?    @db.Date
+  createdAt            DateTime     @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime     @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?      @db.Uuid
+  ownerUserId          String?      @db.Uuid
+  workspace            workspace?   @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_169dc661e9f8023927861ce28dc")
+  user                 user?        @relation(fields: [ownerUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_b2ddd635746196491758f3b79f1")
+  key_result           key_result[]
+}
+
+model group_conversation {
+  conversationId             String                       @id(map: "PK_643c9854b49f12119f37e3b509b") @db.Uuid
+  groupName                  String                       @db.VarChar
+  groupAvatar                String?                      @db.VarChar
+  ownerId                    String                       @db.Uuid
+  calendar_event_participant calendar_event_participant[]
+  conversation               conversation                 @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_643c9854b49f12119f37e3b509b")
+  user                       user                         @relation(fields: [ownerId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_bd06651f5f20ad5b2f69a241878")
+  group_invite               group_invite[]
+  group_member               group_member[]
+}
+
+model group_invite {
+  inviteId                              String                   @id(map: "PK_64219f648f972678e2ae2b6fb70") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  status                                group_invite_status_enum @default(pending)
+  createdAt                             DateTime                 @default(now()) @db.Timestamp(6)
+  respondedAt                           DateTime?                @db.Timestamp(6)
+  groupConversationId                   String?                  @db.Uuid
+  inviterUserId                         String?                  @db.Uuid
+  inviteeUserId                         String?                  @db.Uuid
+  user_group_invite_inviterUserIdTouser user?                    @relation("group_invite_inviterUserIdTouser", fields: [inviterUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_2a22b1d8639da8c537ea23fde00")
+  user_group_invite_inviteeUserIdTouser user?                    @relation("group_invite_inviteeUserIdTouser", fields: [inviteeUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_580269415a5f0fbed79de07a1c8")
+  group_conversation                    group_conversation?      @relation(fields: [groupConversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_6afe4e31d63cc7db54351a999b3")
+
+  @@index([groupConversationId, inviteeUserId, status], map: "IDX_e6504943e1cff300464c80d59f")
+}
+
+model group_member {
+  id                  String                 @id(map: "PK_65634517a244b69a8ef338d03c3") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  role                group_member_role_enum @default(member)
+  joinedAt            DateTime               @default(now()) @db.Timestamp(6)
+  groupConversationId String?                @db.Uuid
+  userUserId          String?                @db.Uuid
+  user                user?                  @relation(fields: [userUserId], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_a7dc9fa3f018c2f914cf5c94d54")
+  group_conversation  group_conversation?    @relation(fields: [groupConversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_f0f0f5baeabdb986863a9fb21e8")
+
+  @@unique([groupConversationId, userUserId], map: "IDX_87c580572736ff67c060803a06")
+}
+
+model inline_comment {
+  inlineCommentId              String           @id(map: "PK_bb6f384a9b1948212810cf4efc4") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  selectedText                 String
+  text                         String
+  isResolved                   Boolean          @default(false)
+  createdAt                    DateTime         @default(now()) @db.Timestamp(6)
+  documentDocumentId           String?          @db.Uuid
+  authorUserId                 String?          @db.Uuid
+  parentCommentInlineCommentId String?          @db.Uuid
+  inline_comment               inline_comment?  @relation("inline_commentToinline_comment", fields: [parentCommentInlineCommentId], references: [inlineCommentId], onDelete: Cascade, onUpdate: NoAction, map: "FK_08eb067e7c47542ccc467b941e0")
+  other_inline_comment         inline_comment[] @relation("inline_commentToinline_comment")
+  user                         user?            @relation(fields: [authorUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_1efc779c5cf730db15455731686")
+  document                     document?        @relation(fields: [documentDocumentId], references: [documentId], onDelete: Cascade, onUpdate: NoAction, map: "FK_f69bebb7d4dc3dd764ef3e92b1c")
+}
+
+model key_result {
+  keyResultId     String   @id(map: "PK_63fcda7c1ef15e4f5a76d4292d3") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title           String   @db.VarChar
+  target          Float    @default(0)
+  current         Float    @default(0)
+  unit            String   @default("") @db.VarChar
+  linkedTaskCount Int      @default(0)
+  createdAt       DateTime @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime @default(now()) @db.Timestamp(6)
+  goalGoalId      String?  @db.Uuid
+  goal            goal?    @relation(fields: [goalGoalId], references: [goalId], onDelete: Cascade, onUpdate: NoAction, map: "FK_ded8b721c7a8e36f68e91171ebf")
+}
+
+model label {
+  labelId              String          @id(map: "PK_bab2db97da08b3dae128d82b297") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  text                 String          @db.VarChar
+  color                String          @default("#3b82f6") @db.VarChar
+  type                 label_type_enum
+  workspaceWorkspaceId String?         @db.Uuid
+  workspace            workspace?      @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_a2c446d0a0ac0ed0e0421e5c3bf")
+  task_labels          task_labels[]
+}
+
+model milestone {
+  milestoneId          String     @id(map: "PK_7282637d9b9e28c0d110af58adf") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title                String     @db.VarChar
+  date                 DateTime   @db.Date
+  status               String     @default("upcoming") @db.VarChar
+  createdAt            DateTime   @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime   @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?    @db.Uuid
+  workspace            workspace? @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_03b8ff24ccb43a7b9bae156164f")
+}
+
+model note_categories {
+  categoryId     String           @id(map: "PK_7de7c7f391477ca7cf2f0052f77") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name           String           @db.VarChar(50)
+  color          String           @default("#3B82F6") @db.VarChar(7)
+  icon           String?          @db.VarChar(50)
+  isDefault      Boolean          @default(false)
+  user_id        String           @db.Uuid
+  created_at     DateTime         @default(now()) @db.Timestamp(6)
+  user           user             @relation(fields: [user_id], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_3f78a638905510513fcc0b722aa")
+  personal_notes personal_notes[]
+
+  @@unique([user_id, name], map: "UQ_6224090b6a65399cf6a993c09e7")
+  @@index([name], map: "IDX_7b2b49f05dc35ab6494d055952")
+}
+
+model otp {
+  id          Int      @id(map: "PK_32556d9d7b22031d7d0e1fd6723") @default(autoincrement())
+  phoneNumber String   @db.VarChar
+  code        String   @db.VarChar
+  expiresAt   DateTime @db.Timestamp(6)
+}
+
+model personal_notes {
+  noteId          String          @id(map: "PK_a81911a08364ce4d8654b3e9e07") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title           String          @db.VarChar(255)
+  content         String
+  category_id     String          @db.Uuid
+  isPinned        Boolean         @default(false)
+  folder_id       String?         @db.Uuid
+  user_id         String          @db.Uuid
+  created_at      DateTime        @default(now()) @db.Timestamp(6)
+  updated_at      DateTime        @default(now()) @db.Timestamp(6)
+  note_categories note_categories @relation(fields: [category_id], references: [categoryId], onUpdate: NoAction, map: "FK_db2680dd1ca4b9dfcd660688a70")
+  user            user            @relation(fields: [user_id], references: [userId], onDelete: Cascade, onUpdate: NoAction, map: "FK_fb1a78e0c19a05d37255d3a5c90")
+
+  @@index([title], map: "IDX_002e1f28b1b96627af50296235")
+  @@index([isPinned], map: "IDX_9f5f699941911de711f6ccdf38")
+  @@index([category_id], map: "IDX_db2680dd1ca4b9dfcd660688a7")
+}
+
+model reminder {
+  reminderId     String          @id(map: "PK_8bc447d6cd5d279b90ca0e276eb") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  minutesBefore  Int
+  eventEventId   String?         @db.Uuid
+  calendar_event calendar_event? @relation(fields: [eventEventId], references: [eventId], onDelete: NoAction, onUpdate: NoAction, map: "FK_59ff57d59dc64e4320a0fdbfe35")
+}
+
+model report {
+  reportId                   String                 @id(map: "PK_afde9e812f5547056a4c378be74") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  description                String                 @db.VarChar
+  creatAt                    DateTime?              @db.Timestamp(6)
+  handleAt                   DateTime?              @db.Timestamp(6)
+  status                     report_status_enum
+  type                       report_type_enum
+  reasonCode                 report_reasoncode_enum
+  userUserId                 String?                @db.Uuid
+  adminAdminId               String?                @db.Uuid
+  conversationConversationId String?                @db.Uuid
+  user                       user?                  @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_43fd474c376a816721644e722ae")
+  conversation               conversation?          @relation(fields: [conversationConversationId], references: [conversationId], onDelete: NoAction, onUpdate: NoAction, map: "FK_492457544a7258b3517b68147d4")
+  admin                      admin?                 @relation(fields: [adminAdminId], references: [adminId], onDelete: NoAction, onUpdate: NoAction, map: "FK_e780765a53f6b751fe45fa10e38")
+}
+
+model sprint {
+  sprintId             String     @id(map: "PK_1a1bb1b0b896ed0d63d7b9e79e5") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name                 String     @db.VarChar
+  goal                 String?
+  status               String     @default("planning") @db.VarChar
+  startDate            DateTime?  @db.Date
+  endDate              DateTime?  @db.Date
+  createdAt            DateTime   @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime   @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?    @db.Uuid
+  workspace            workspace? @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_c34842c30bcaf14e34eb241421c")
+  task                 task[]
+}
+
+model sub_task {
+  subTaskId       String               @id(map: "PK_db414a14555ebc3638186fa541d") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title           String               @db.VarChar
+  description     String?
+  status          sub_task_status_enum @default(TODO)
+  order           Int                  @default(0)
+  deadline        DateTime?            @db.Timestamp(6)
+  createdAt       DateTime             @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime             @default(now()) @db.Timestamp(6)
+  taskTaskId      String?              @db.Uuid
+  parentSubTaskId String?              @db.Uuid
+  assigneeUserId  String?              @db.Uuid
+  sub_task        sub_task?            @relation("sub_taskTosub_task", fields: [parentSubTaskId], references: [subTaskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_1ac9d432d6a6cba3cd4f23ddad9")
+  other_sub_task  sub_task[]           @relation("sub_taskTosub_task")
+  task            task?                @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_80cc237d4b2d3c90a9160e42f94")
+  user            user?                @relation(fields: [assigneeUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_d4aab7c3416062ab767623357ca")
+}
+
+model task {
+  taskId          String             @id(map: "PK_c5a68aa4b5c8d38a06f8e8d4c57") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  title           String             @db.VarChar
+  priority        task_priority_enum
+  status          task_status_enum
+  startDate       DateTime?          @db.Timestamp(6)
+  dueDate         DateTime?          @db.Timestamp(6)
+  completedAt     DateTime?          @db.Timestamp(6)
+  boardBoardId    String?            @db.Uuid
+  order           Int                @default(0)
+  createdAt       DateTime           @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime           @default(now()) @db.Timestamp(6)
+  columnColumnId  String?            @db.Uuid
+  createdByUserId String?            @db.Uuid
+  description     String?
+  storyPoints     Int?
+  sprintSprintId  String?            @db.Uuid
+  activity_log    activity_log[]
+  attachment      attachment[]
+  comment         comment[]
+  sub_task        sub_task[]
+  sprint          sprint?            @relation(fields: [sprintSprintId], references: [sprintId], onUpdate: NoAction, map: "FK_37f6d927d183adebfed45a35a37")
+  task_board      task_board?        @relation(fields: [boardBoardId], references: [boardId], onDelete: Cascade, onUpdate: NoAction, map: "FK_6f876783d0a56d2445b4cb45346")
+  user            user?              @relation(fields: [createdByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_b5dae9857187a41d7d09e07b7e3")
+  board_column    board_column?      @relation(fields: [columnColumnId], references: [columnId], onUpdate: NoAction, map: "FK_f89504cb91201decd9f1f9603c1")
+  task_assignee   task_assignee[]
+  task_labels     task_labels[]
+  task_list       task_list[]
+}
+
+model task_assignee {
+  id         String   @id(map: "PK_75114a0b55080c15694f3d40ec9") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  assignedAt DateTime @default(now()) @db.Timestamp(6)
+  taskTaskId String?  @db.Uuid
+  userUserId String?  @db.Uuid
+  task       task?    @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, onUpdate: NoAction, map: "FK_8af9a797e47b5f298a86a31518b")
+  user       user?    @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_dc7e94da8f649818dad8ed3c40b")
+}
+
+model task_board {
+  boardId              String         @id(map: "PK_8982dd87d83b489977d43284cc4") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  boardName            String         @db.VarChar
+  backgroundColor      String         @default("#0d9488") @db.VarChar
+  createdAt            DateTime       @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?        @db.Uuid
+  description          String?        @db.VarChar
+  icon                 String         @default("fa-clipboard-list") @db.VarChar
+  updatedAt            DateTime       @default(now()) @db.Timestamp(6)
+  board_column         board_column[]
+  epic                 epic[]
+  task                 task[]
+  workspace            workspace?     @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_d56369ce0da1ed04f509b5e15b1")
+}
+
+model task_labels {
+  taskTaskId   String @db.Uuid
+  labelLabelId String @db.Uuid
+  label        label  @relation(fields: [labelLabelId], references: [labelId], onDelete: Cascade, map: "FK_19475b91a5574599f6affe04b85")
+  task         task   @relation(fields: [taskTaskId], references: [taskId], onDelete: Cascade, map: "FK_35b384bc76bb94a681d03e0cb1f")
+
+  @@id([taskTaskId, labelLabelId], map: "PK_39f1b9bc9c53facde6f501081bf")
+  @@index([labelLabelId], map: "IDX_19475b91a5574599f6affe04b8")
+  @@index([taskTaskId], map: "IDX_35b384bc76bb94a681d03e0cb1")
+}
+
+model task_list {
+  id         String  @id(map: "PK_e9f70d01f59395c1dfdc633ae37") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  isSeen     Boolean @default(false)
+  taskTaskId String? @db.Uuid
+  userUserId String? @db.Uuid
+  user       user?   @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_94ddbdb257af2a187c298e592eb")
+  task       task?   @relation(fields: [taskTaskId], references: [taskId], onDelete: NoAction, onUpdate: NoAction, map: "FK_d8238cfa792756046d71327ca15")
+}
+
+model user {
+  email                                              String?                      @unique(map: "UQ_e12875dfb3b1d92d7d7c5377e22") @db.VarChar
+  userId                                             String                       @id(map: "PK_d72ea127f30e21753c9e229891e") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  phoneNumber                                        String                       @unique(map: "UQ_f2578043e491921209f5dadd080") @db.VarChar
+  passwordHash                                       String                       @db.VarChar
+  fullName                                           String                       @db.VarChar
+  birthDate                                          DateTime?                    @db.Timestamp(6)
+  gender                                             String?                      @db.VarChar
+  avatarUrl                                          String?                      @db.VarChar
+  coverImage                                         String?                      @db.VarChar
+  isOnline                                           Boolean                      @default(false)
+  showOnlineStatus                                   Boolean                      @default(true)
+  isActive                                           Boolean                      @default(true)
+  createdAt                                          DateTime                     @default(now()) @db.Timestamp(6)
+  fileUserFileId                                     String?                      @db.Uuid
+  activity_log                                       activity_log[]
+  attachment                                         attachment[]
+  automation_rule                                    automation_rule[]
+  calendar_event                                     calendar_event[]
+  calendar_event_participant                         calendar_event_participant[]
+  comment                                            comment[]
+  contact                                            contact[]
+  conversation_participants                          conversation_participants[]
+  document_document_lastEditedByUserIdTouser         document[]                   @relation("document_lastEditedByUserIdTouser")
+  document_document_createdByUserIdTouser            document[]                   @relation("document_createdByUserIdTouser")
+  document_version                                   document_version[]
+  epic                                               epic[]
+  friend_request_friend_request_receiverUserIdTouser friend_request[]             @relation("friend_request_receiverUserIdTouser")
+  friend_request_friend_request_senderUserIdTouser   friend_request[]             @relation("friend_request_senderUserIdTouser")
+  friendship_friendship_userTwoUserIdTouser          friendship[]                 @relation("friendship_userTwoUserIdTouser")
+  friendship_friendship_userOneUserIdTouser          friendship[]                 @relation("friendship_userOneUserIdTouser")
+  goal                                               goal[]
+  group_conversation                                 group_conversation[]
+  group_invite_group_invite_inviterUserIdTouser      group_invite[]               @relation("group_invite_inviterUserIdTouser")
+  group_invite_group_invite_inviteeUserIdTouser      group_invite[]               @relation("group_invite_inviteeUserIdTouser")
+  group_member                                       group_member[]
+  inline_comment                                     inline_comment[]
+  note_categories                                    note_categories[]
+  personal_notes                                     personal_notes[]
+  report                                             report[]
+  sub_task                                           sub_task[]
+  task                                               task[]
+  task_assignee                                      task_assignee[]
+  task_list                                          task_list[]
+  file                                               file?                        @relation(fields: [fileUserFileId], references: [fileId], onDelete: NoAction, onUpdate: NoAction, map: "FK_78b64eaf42a4fab3d4b2f4f8b89")
+  user_session                                       user_session[]
+  workspace                                          workspace[]
+  workspace_file                                     workspace_file[]
+  workspace_member                                   workspace_member[]
+}
+
+model user_session {
+  sessionId    String   @id(map: "PK_122ac0140676b89411d43901c5d") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  accessToken  String   @db.VarChar
+  refreshToken String   @db.VarChar
+  deviceInfo   String   @db.VarChar
+  ipAddress    String   @db.VarChar
+  loginAt      DateTime @db.Timestamp(6)
+  expiresAt    DateTime @db.Timestamp(6)
+  isRevoked    Boolean  @default(false)
+  userUserId   String?  @db.Uuid
+  user         user?    @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_cc36c319b18fec573b588f2b4ca")
+}
+
+model workspace {
+  workspaceId      String              @id(map: "PK_31ccf7ebfeac0247ed339801a0d") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  workspaceName    String              @db.VarChar
+  description      String?             @db.VarChar
+  avatarUrl        String?             @db.VarChar
+  memberLimit      Int                 @default(50)
+  createdAt        DateTime            @default(now()) @db.Timestamp(6)
+  fileUserFileId   String?             @db.Uuid
+  type             workspace_type_enum @default(BUSINESS)
+  color            String              @default("#0d9488") @db.VarChar
+  isPublic         Boolean             @default(false)
+  updatedAt        DateTime            @default(now()) @db.Timestamp(6)
+  ownerUserId      String?             @db.Uuid
+  automation_rule  automation_rule[]
+  channel          channel[]
+  document         document[]
+  epic             epic[]
+  goal             goal[]
+  label            label[]
+  milestone        milestone[]
+  sprint           sprint[]
+  task_board       task_board[]
+  user             user?               @relation(fields: [ownerUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_a217a61a8a2eaba507b99b492bf")
+  file             file?               @relation(fields: [fileUserFileId], references: [fileId], onDelete: NoAction, onUpdate: NoAction, map: "FK_c8e40b7aaea558bc27e2609a772")
+  workspace_file   workspace_file[]
+  workspace_member workspace_member[]
+}
+
+model workspace_file {
+  fileId               String           @id(map: "PK_19d2362312f8a8371063da001eb") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  name                 String           @db.VarChar
+  type                 String           @default("file") @db.VarChar
+  mimeType             String?          @db.VarChar
+  size                 Int?
+  url                  String?          @db.VarChar
+  accessLevel          String           @default("workspace") @db.VarChar
+  uploadedAt           DateTime         @default(now()) @db.Timestamp(6)
+  createdAt            DateTime         @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?          @db.Uuid
+  uploadedByUserId     String?          @db.Uuid
+  parentFileId         String?          @db.Uuid
+  workspace            workspace?       @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_24e306612afb9cf2747879482cf")
+  user                 user?            @relation(fields: [uploadedByUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_58c76b51b25bb27604cf7ed2371")
+  workspace_file       workspace_file?  @relation("workspace_fileToworkspace_file", fields: [parentFileId], references: [fileId], onDelete: Cascade, onUpdate: NoAction, map: "FK_c03a73bb2bfbcd3f3069616a553")
+  other_workspace_file workspace_file[] @relation("workspace_fileToworkspace_file")
+}
+
+model workspace_member {
+  id                   String                     @id(map: "PK_a3a35f64bf30517010551467c6e") @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  role                 workspace_member_role_enum
+  joinedAt             DateTime                   @default(now()) @db.Timestamp(6)
+  workspaceWorkspaceId String?                    @db.Uuid
+  userUserId           String?                    @db.Uuid
+  workspace            workspace?                 @relation(fields: [workspaceWorkspaceId], references: [workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "FK_06d75add27bcfbc8cc5f63a5b75")
+  user                 user?                      @relation(fields: [userUserId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_3661b5dda8c8374d4b044e4179f")
+}
+
+enum board_column_status_enum {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+  ARCHIVED
+}
+
+enum calendar_event_category_enum {
+  personal
+  meeting
+  reminder
+  other
+}
+
+enum calendar_event_participant_type_enum {
+  friend
+  group
+}
+
+enum calendar_event_recurrence_enum {
+  none
+  daily
+  weekly
+  monthly
+  yearly
+}
+
+enum channel_type_enum {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum conversation_participants_role_enum {
+  admin
+  member
+}
+
+enum conversation_type_enum {
+  PRIVATE
+  GROUP
+}
+
+enum friend_request_status_enum {
+  pending
+  accepted
+  declined
+  canceled
+}
+
+enum friendship_status_enum {
+  active
+  blocked
+}
+
+enum group_invite_status_enum {
+  pending
+  accepted
+  declined
+  revoked
+}
+
+enum group_member_role_enum {
+  owner
+  admin
+  member
+}
+
+enum label_type_enum {
+  FEATURE
+  BUG
+  DESIGN
+  URGENT
+  IMPROVEMENT
+}
+
+enum report_reasoncode_enum {
+  SPAM
+  ABUSE
+  SCAM
+  OTHER
+}
+
+enum report_status_enum {
+  PENDING
+  REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum report_type_enum {
+  USER
+  MESSAGE
+  GROUP
+}
+
+enum sub_task_status_enum {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+  ARCHIVED
+}
+
+enum task_priority_enum {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum task_status_enum {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+  ARCHIVED
+}
+
+enum workspace_member_role_enum {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum workspace_type_enum {
+  BUSINESS
+  EDUCATION
+  COMMUNITY
+  PERSONAL
+}

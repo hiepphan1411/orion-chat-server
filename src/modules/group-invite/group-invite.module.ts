@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { GroupConversation } from '../group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from '../conversation/entities/group-conversation.entity';
 import { GroupMember } from '../group-member/entities/group-member.entity';
 import { User } from '../users/entities/user.entity';
 import { GroupInviteController } from './group-invite.controller';

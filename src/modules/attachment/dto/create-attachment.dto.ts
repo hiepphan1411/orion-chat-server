@@ -1,18 +1,23 @@
-import { IsString, IsNumber } from 'class-validator';
+import { IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateAttachmentDto {
+  @IsOptional()
   @IsString()
-  fileName: string;
+  fileName?: string;
 
+  @IsOptional()
   @IsString()
-  fileUrl: string;
+  fileUrl?: string;
 
+  @IsOptional()
   @IsString()
-  fileType: string;
+  fileType?: string;
 
+  @IsOptional()
+  @IsString()
+  uploadedById?: string;
+
+  @IsOptional()
   @IsNumber()
-  fileSize: number;
-
-  @IsString()
-  uploadedById: string;
+  fileSize?: number;
 }

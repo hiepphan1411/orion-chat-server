@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GroupConversation } from '../group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from '../conversation/entities/group-conversation.entity';
 import { GroupInvite, GroupInviteStatus } from './entities/group-invite.entity';
 import {
   GroupMember,

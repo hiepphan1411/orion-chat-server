@@ -9,10 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import type { Request } from 'express';
-import {
-  SESSION_TIMEOUT,
-  isSessionExpired,
-} from '../../../config/session.config';
 
 interface TokenPayload {
   phoneNumber: string;
@@ -40,10 +36,10 @@ export class JwtSessionGuard implements CanActivate {
     }
 
     try {
-      //trích xuất số điện thoại từ token
+      // Trích xuất số điện thoại từ token
       const phoneNumber = this.extractPhoneFromToken(token);
 
-      // Find user
+      // Tìm user
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
       });
@@ -52,42 +48,14 @@ export class JwtSessionGuard implements CanActivate {
         throw new UnauthorizedException('Người dùng không tồn tại');
       }
 
-      // Check if user is active
+      // Kiểm tra trạng thái tài khoản
       if (!user.isActive) {
         throw new UnauthorizedException('Tài khoản đã bị vô hiệu hóa');
       }
 
-      // Single Session Login
-
-      if (user.currentSessionToken !== token) {
-        this.logger.warn(
-          `Session expired for user ${phoneNumber}. Token mismatch detected. User logged in elsewhere.`,
-        );
-        throw new UnauthorizedException(
-          'Phiên làm việc đã hết hạn. Bạn đã đăng nhập ở nơi khác.',
-        );
-      }
-
-      // Session Timeout kiểm tra nếu không có hoạt động
-
-      if (isSessionExpired(user.lastActivityAt, SESSION_TIMEOUT.DEFAULT)) {
-        this.logger.warn(
-          `Session timeout for user ${phoneNumber}. No activity for more than 15 minutes.`,
-        );
-        // xóa token phiên làm việc
-        user.currentSessionToken = null as unknown as string;
-        await this.userRepo.save(user);
-
-        throw new UnauthorizedException(
-          'Phiên làm việc đã hết hạn do không hoạt động.',
-        );
-      }
-
-      // Update last activity time
-      user.lastActivityAt = Date.now();
-      await this.userRepo.save(user);
-
-      // Attach user info to request
+      // Gán thông tin người dùng vào request
+      // JWT token validity sẽ được kiểm tra bởi @UseGuards(JwtAuthGuard)
+      // Logout sẽ chỉ xảy ra khi token hết hạn (exp claim)
       request.user = {
         phoneNumber: user.phoneNumber,
         userId: user.userId,
@@ -121,8 +89,14 @@ export class JwtSessionGuard implements CanActivate {
       const payload = JSON.parse(
         Buffer.from(parts[1], 'base64').toString('utf-8'),
       ) as TokenPayload;
+
+      if (!payload.phoneNumber) {
+        throw new Error('phoneNumber not found in token');
+      }
+
       return payload.phoneNumber;
-    } catch {
+    } catch (error) {
+      this.logger.error('Error extracting phone from token:', error);
       throw new UnauthorizedException('Token không hợp lệ');
     }
   }

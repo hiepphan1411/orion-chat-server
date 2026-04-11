@@ -1,10 +1,11 @@
-import { GroupConversation } from 'src/modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from 'src/modules/conversation/entities/group-conversation.entity';
 import { User } from 'src/modules/users/entities/user.entity';
 import {
   Column,
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -21,7 +22,14 @@ export class GroupMember {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => GroupConversation, { eager: true, onDelete: 'CASCADE' })
+  @ManyToOne(() => GroupConversation, (group) => group.members, {
+    eager: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({
+    name: 'groupConversationId',
+    referencedColumnName: 'conversationId',
+  })
   group: GroupConversation;
 
   @ManyToOne(() => User, { eager: true, onDelete: 'CASCADE' })
