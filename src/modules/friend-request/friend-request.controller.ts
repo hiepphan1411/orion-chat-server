@@ -21,9 +21,20 @@ export class FriendRequestController {
     );
   }
 
+  /**
+   * Lấy lời mời kết bạn đến (pending)
+   */
   @Get('incoming')
   getIncoming(@Query('userId') userId: string) {
     return this.friendRequestService.getIncoming(userId);
+  }
+
+  /**
+   * Lấy lời mời kết bạn đi (pending)
+   */
+  @Get('outgoing')
+  getOutgoing(@Query('userId') userId: string) {
+    return this.friendRequestService.getOutgoing(userId);
   }
 
   @Patch(':id/accept')

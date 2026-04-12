@@ -10,7 +10,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, Res } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
@@ -33,6 +33,7 @@ const onlineUsers = new Map<string, string>();
       'http://localhost:5174',
       'http://localhost:3001',
       'https://deceitfully-unquailing-haylee.ngrok-free.dev',
+      'https://foveate-tristan-disepalous.ngrok-free.dev',
       'https://d1m0lu9iwqsfsh.cloudfront.net',
       'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com',
     ],
@@ -198,9 +199,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Các @SubscribeMessage còn lại **giữ nguyên hoàn toàn** như code cũ của bạn
   // (handleJoinConversation, handleSendMessage, handleTyping, handleFetchMessages, ...)
-
   @SubscribeMessage('chat:join_conversation')
-  async handleJoinConversation(
+  handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { requestId: string; conversationId: string },
   ) {
@@ -246,6 +246,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       replyToMessageId?: string;
     },
   ) {
+    this.logger.log(`RECEIVED MESSAGE: ${JSON.stringify(data)}`);
+
     try {
       this.logger.log(
         `[ChatGateway] Sending message in conversation: ${data.conversationId}`,
@@ -316,7 +318,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         messageStatus: 'SENT',
       });
 
-      // ACK back to sender
+      // ACK back to sender via return (Socket.io auto-invokes callback)
       return {
         ok: true,
         requestId: data.requestId,
@@ -330,19 +332,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.error('Error sending message:', error);
       return {
         ok: false,
-        requestId: data.requestId,
         error: {
           code: 'SEND_FAILED',
           message: error instanceof Error ? error.message : 'Send failed',
-          retriable: true,
-          details: { clientMessageId: data.clientMessageId },
         },
       };
     }
   }
 
   @SubscribeMessage('chat:typing')
-  async handleTyping(
+  handleTyping(
     @ConnectedSocket() client: Socket,
     @MessageBody()
     data: {
