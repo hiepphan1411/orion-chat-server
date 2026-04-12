@@ -70,10 +70,6 @@ jobs:
             echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
             exit 1
           fi
-          if [ -n "${{ secrets.EC2_SSH_KEY }}" ] && [ -n "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
-            echo "Both EC2_SSH_KEY and EC2_SSH_KEY_B64 are set. Keep only one to avoid using a stale key."
-            exit 1
-          fi
 
       - name: Prepare SSH private key file
         run: |
