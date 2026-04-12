@@ -1,6 +1,6 @@
 # Orion Chat Backend - Deploy EC2 Nhanh Nhat
 
-Tai lieu nay chi deploy backend, de frontend goi den 1 link API co dinh (khong can ngrok trong production).
+Tai lieu nay chi deploy backend, de frontend goi den 1 link API co dinh (khong can ngrok trong production), theo che do local-db (postgres/mongo/redis chay bang container).
 
 ## 1. Ban can chuan bi
 
@@ -64,7 +64,7 @@ cd ~/orion-chat-backend
 
 Tao `.env.production` (copy tu `.env.production.example` trong repo) va thay gia tri that.
 
-Luu y bat buoc:
+Luu y bat buoc (local-db):
 
 - `DB_HOST=postgres`
 - `MONGO_URI=mongodb://root:...@mongodb:27017/orion_chat?authSource=admin`
@@ -72,6 +72,17 @@ Luu y bat buoc:
 - `TYPEORM_SYNC=false`
 - `ALLOWED_ORIGINS=` danh sach domain frontend, cach nhau bang dau phay
 - `SOCKET_ALLOWED_ORIGINS=` tuong tu
+
+Neu ban da tung deploy truoc do va vua doi `DB_USER`/`DB_NAME`/`DB_PASSWORD` hoac `MONGO_INITDB_*`, co the bi loi `unhealthy` do volume cu giu credential cu.
+
+Reset volume (CHI khi chap nhan xoa du lieu cu):
+
+```bash
+cd ~/orion-chat-backend
+docker compose -f docker-compose.backend.yml --env-file .env.production down
+docker volume rm orion-chat-backend_postgres_data orion-chat-backend_mongo_data orion-chat-backend_redis_data
+docker compose -f docker-compose.backend.yml --env-file .env.production up -d
+```
 
 ## 5. Setup Nginx reverse proxy + SSL
 
@@ -105,12 +116,12 @@ sudo certbot --nginx -d api.your-domain.com
 
 ## 6. Trigger CI/CD
 
-Chi can push code len `main` hoac `dev`:
+Chi can push code len `develop`:
 
 ```bash
 git add .
 git commit -m "setup backend ec2 cicd"
-git push origin main
+git push origin develop
 ```
 
 Workflow se:

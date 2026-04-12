@@ -28,10 +28,15 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER} -d ${DB_NAME}']
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h localhost -p 5432 -U ${DB_USER} -d ${DB_NAME}',
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 20
+      start_period: 30s
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -50,7 +55,8 @@ services:
         ]
       interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 20
+      start_period: 30s
     volumes:
       - mongo_data:/data/db
 
@@ -63,7 +69,8 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 20
+      start_period: 10s
     volumes:
       - redis_data:/data
 

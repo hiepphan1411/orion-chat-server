@@ -118,7 +118,20 @@ jobs:
 
             export DOCKER_IMAGE="$DOCKER_USERNAME/orion-chat-backend:$IMAGE_TAG"
             docker compose -f docker-compose.backend.yml --env-file .env.production pull backend
-            docker compose -f docker-compose.backend.yml --env-file .env.production up -d --remove-orphans
+
+            # Start data services first so failures are easier to diagnose.
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d postgres mongodb redis || true
+
+            if ! docker compose -f docker-compose.backend.yml --env-file .env.production up -d --remove-orphans; then
+              echo "[DIAG] docker compose up failed. Printing status and recent logs..."
+              docker compose -f docker-compose.backend.yml --env-file .env.production ps || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 postgres || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 mongodb || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 redis || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 backend || true
+              exit 1
+            fi
+
             docker image prune -f
 
             echo "Deploy success with image: $DOCKER_IMAGE"
