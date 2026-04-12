@@ -1,10 +1,7 @@
 name: Backend CI/CD Pipeline
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/orion-chat-backend

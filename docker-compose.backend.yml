@@ -13,9 +13,9 @@ services:
       postgres:
         condition: service_healthy
       mongodb:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - backend_uploads:/app/uploads
 
@@ -28,7 +28,7 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER} -d ${DB_NAME}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,6 +42,15 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "echo 'db.adminCommand({ ping: 1 }).ok' | mongosh mongodb://$$MONGO_INITDB_ROOT_USERNAME:$$MONGO_INITDB_ROOT_PASSWORD@localhost:27017/admin --quiet",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
     volumes:
       - mongo_data:/data/db
 
@@ -50,6 +59,11 @@ services:
     container_name: orion_redis
     restart: unless-stopped
     command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - redis_data:/data
 

@@ -44,7 +44,7 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from './modules/conversation/entities/group-conversation.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -65,15 +65,15 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { Conversation } from './modules/conversation/entities/conversation.schema';
+import { ConversationParticipant } from './modules/conversation/entities/conversation-participant.entity';
+import { ConversationModule } from './modules/conversation/conversation.module';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
-<<<<<<< Updated upstream
-=======
 import { UsersModule } from './modules/users/users.module';
 import { UserSettingsModule } from './modules/user-settings/user-settings.module';
 import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
@@ -84,7 +84,6 @@ import { NotificationSettings } from './modules/notification-settings/entities/n
 import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
 import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
 import { HealthController } from './health.controller';
->>>>>>> Stashed changes
 
 @Module({
   controllers: [HealthController],
@@ -94,54 +93,6 @@ import { HealthController } from './health.controller';
       isGlobal: true,
     }),
 
-<<<<<<< Updated upstream
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres',
-      password: '123456789',
-      database: 'orion_chat',
-      entities: [
-        User,
-        Task,
-        TaskAssignee,
-        TaskBoard,
-        TaskList,
-        Workspace,
-        WorkspaceMember,
-        BoardColumn,
-        Label,
-        Report,
-        Admin,
-        Conversation,
-        SubTask,
-        Comment,
-        Attachment,
-        ActivityLog,
-        PersonalNote,
-        NoteCategory,
-        FriendRequest,
-        Friendship,
-        GroupConversation,
-        GroupMember,
-        GroupInvite,
-        CalendarEvent,
-        CalendarEventParticipant,
-        AutomationRule,
-        Document,
-        DocumentVersion,
-        InlineComment,
-        WorkspaceFile,
-        Goal,
-        KeyResult,
-        Sprint,
-        Epic,
-        Milestone,
-      ],
-      autoLoadEntities: true,
-      synchronize: true,
-=======
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -197,7 +148,6 @@ import { HealthController } from './health.controller';
         synchronize:
           configService.get<string>('TYPEORM_SYNC', 'false') === 'true',
       }),
->>>>>>> Stashed changes
     }),
 
     // MongoDB - Using environment variable
@@ -235,6 +185,8 @@ import { HealthController } from './health.controller';
     AttachmentModule,
     NotesModule,
     FriendRequestModule,
+    UsersModule,
+    ConversationModule,
     GroupInviteModule,
     FriendsModule,
     PresenceModule,
@@ -246,6 +198,10 @@ import { HealthController } from './health.controller';
     SprintModule,
     EpicModule,
     MilestoneModule,
+    UserSettingsModule,
+    NotificationSettingsModule,
+    PrivacySettingsModule,
+    UserDevicesModule,
   ],
 })
 export class AppModule {}

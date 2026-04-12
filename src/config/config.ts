@@ -16,9 +16,6 @@ export default () => ({
     database: process.env.DB_NAME || 'orion_chat',
   },
   mongodb: {
-<<<<<<< Updated upstream
-    uri: process.env.MONGO_URL || 'mongodb://localhost:27017/orion_chat',
-=======
     uri: process.env.MONGO_URI || process.env.MONGO_URL,
   },
   aws: {
@@ -29,7 +26,6 @@ export default () => ({
     s3PublicBaseUrl: process.env.AWS_S3_PUBLIC_BASE_URL,
     // s3Endpoint: process.env.AWS_S3_ENDPOINT,
     s3ForcePathStyle: process.env.AWS_S3_FORCE_PATH_STYLE === 'true',
->>>>>>> Stashed changes
   },
   esms: {
     apiKey: process.env.ESMS_API_KEY,

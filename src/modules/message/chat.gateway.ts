@@ -25,7 +25,9 @@ type ChatClientMessageType = 'text' | 'image' | 'file' | 'audio' | 'video';
 const onlineUsers = new Map<string, string>();
 
 const socketAllowedOrigins = (
-  process.env.SOCKET_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || ''
+  process.env.SOCKET_ALLOWED_ORIGINS ||
+  process.env.ALLOWED_ORIGINS ||
+  ''
 )
   .split(',')
   .map((origin) => origin.trim().replace(/\/$/, ''))

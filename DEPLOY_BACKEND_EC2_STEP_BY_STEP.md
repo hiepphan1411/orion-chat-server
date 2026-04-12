@@ -12,6 +12,7 @@ Tai lieu nay chi deploy backend, de frontend goi den 1 link API co dinh (khong c
 ## 2. Chuan bi code (da tao san trong repo)
 
 Da co san:
+
 - `Dockerfile`
 - `.dockerignore`
 - `.github/workflows/cicd-backend-ec2.yml`
@@ -64,6 +65,7 @@ cd ~/orion-chat-backend
 Tao `.env.production` (copy tu `.env.production.example` trong repo) va thay gia tri that.
 
 Luu y bat buoc:
+
 - `DB_HOST=postgres`
 - `MONGO_URI=mongodb://root:...@mongodb:27017/orion_chat?authSource=admin`
 - `REDIS_HOST=redis`
@@ -112,6 +114,7 @@ git push origin main
 ```
 
 Workflow se:
+
 - build image backend
 - push Docker Hub
 - SSH vao EC2
@@ -139,6 +142,7 @@ Ky vong tra ve `ok: true`.
 ## 8. Frontend can doi gi?
 
 Sau khi backend len EC2:
+
 - REST base URL: `https://api.your-domain.com`
 - Socket URL: `https://api.your-domain.com/chat`, `https://api.your-domain.com/call`, `https://api.your-domain.com/presence`
 
@@ -152,3 +156,105 @@ Khong can ngrok trong production.
   - 22 tu IP cua ban
   - 80/443 public
   - khong mo 8080 public (Nginx se proxy noi bo)
+
+## 10. Database co mat khi tat Docker khong?
+
+Khong mat neu ban dung named volume (file compose da dung san):
+
+- `postgres_data` cho PostgreSQL
+- `mongo_data` cho MongoDB
+- `redis_data` cho Redis
+
+Du lieu CHI mat khi ban xoa volume. Vi du nguy hiem:
+
+- `docker compose down -v`
+- `docker volume rm ...`
+- xoa thu muc `/var/lib/docker/volumes/...`
+
+Lenh an toan (khong mat database):
+
+```bash
+docker compose -f docker-compose.backend.yml --env-file .env.production stop
+docker compose -f docker-compose.backend.yml --env-file .env.production start
+docker compose -f docker-compose.backend.yml --env-file .env.production up -d
+```
+
+Khuyen nghi backup dinh ky:
+
+- Postgres: `pg_dump`
+- MongoDB: `mongodump`
+
+## 11. Checklist verify trong 5 phut
+
+1. Kiem tra workflow tren GitHub da xanh (build + deploy).
+
+2. Kiem tra container tren EC2:
+
+```bash
+cd ~/orion-chat-backend
+docker compose -f docker-compose.backend.yml --env-file .env.production ps
+```
+
+Trang thai mong doi: `backend`, `postgres`, `mongodb`, `redis` deu `Up` (healthy neu co).
+
+3. Kiem tra health API:
+
+```bash
+curl -i https://api.your-domain.com/health
+```
+
+Mong doi: HTTP 200, body co `"ok": true`.
+
+4. Kiem tra log backend nhanh:
+
+```bash
+docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=120 backend
+```
+
+Mong doi: khong co crash loop, khong co loi ket noi DB.
+
+5. Test tu frontend:
+
+- goi 1 API can auth (login/profile)
+- tao 1 ban ghi nho (vi du note/message)
+- refresh lai de xac nhan du lieu van con
+
+## 12. Muon sua DB thi co phai SSH vao EC2 khong?
+
+Neu ban dung Mongo/Postgres container tren EC2 nhu file compose hien tai, cau tra loi la: **co**.
+
+Cach an toan nhat:
+
+- SSH vao EC2
+- vao shell cua container
+- dung psql/mongosh ben trong container
+
+PostgreSQL:
+
+```bash
+ssh -i /path/to/key.pem ubuntu@<EC2_PUBLIC_IP>
+cd ~/orion-chat-backend
+docker compose -f docker-compose.backend.yml --env-file .env.production exec postgres psql -U orion_user -d orion_chat
+```
+
+MongoDB:
+
+```bash
+ssh -i /path/to/key.pem ubuntu@<EC2_PUBLIC_IP>
+cd ~/orion-chat-backend
+docker compose -f docker-compose.backend.yml --env-file .env.production exec mongodb mongosh "mongodb://root:<MONGO_INITDB_ROOT_PASSWORD>@localhost:27017/orion_chat?authSource=admin"
+```
+
+Khong khuyen nghi mo port DB ra Internet (5432/27017).
+
+Neu can dung local client (DBeaver, Compass) ma van an toan, dung SSH tunnel:
+
+```bash
+# PostgreSQL tunnel
+ssh -i /path/to/key.pem -L 5432:127.0.0.1:5432 ubuntu@<EC2_PUBLIC_IP>
+
+# MongoDB tunnel
+ssh -i /path/to/key.pem -L 27017:127.0.0.1:27017 ubuntu@<EC2_PUBLIC_IP>
+```
+
+Sau do local app ket noi `localhost:5432` hoac `localhost:27017`.
