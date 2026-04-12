@@ -81,6 +81,11 @@ jobs:
             echo "Using EC2_SSH_KEY"
             printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ./.ec2_key.pem
           fi
+
+          # Normalize line endings to avoid key auth failures from CRLF secrets.
+          tr -d '\r' < ./.ec2_key.pem > ./.ec2_key.normalized.pem
+          mv ./.ec2_key.normalized.pem ./.ec2_key.pem
+
           chmod 600 ./.ec2_key.pem
           ssh-keygen -y -f ./.ec2_key.pem > /dev/null
 
@@ -90,12 +95,29 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_ENV"
 
+      - name: Preflight SSH authentication
+        run: |
+          set -e
+          SSH_PORT="${{ secrets.EC2_PORT }}"
+          if [ -z "$SSH_PORT" ]; then
+            SSH_PORT="22"
+          fi
+
+          ssh -i ./.ec2_key.pem \
+            -o StrictHostKeyChecking=no \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -p "$SSH_PORT" \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "echo '[OK] SSH auth success'"
+
       - name: Upload deploy files
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ env.EC2_SSH_KEY_DECODED }}
+          port: ${{ secrets.EC2_PORT || 22 }}
           source: 'docker-compose.backend.yml'
           target: '~/orion-chat-backend'
 
@@ -109,6 +131,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ env.EC2_SSH_KEY_DECODED }}
+          port: ${{ secrets.EC2_PORT || 22 }}
           envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD
           script: |
             set -e
