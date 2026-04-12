@@ -66,17 +66,32 @@ jobs:
             echo "Missing secret: EC2_USER"
             exit 1
           fi
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
-            echo "Missing or empty secret: EC2_SSH_KEY"
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ] && [ -z "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+            echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
             exit 1
           fi
+
+      - name: Prepare SSH private key file
+        run: |
+          set -e
+          if [ -n "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+            echo "Using EC2_SSH_KEY_B64"
+            echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > ./.ec2_key.pem
+          else
+            echo "Using EC2_SSH_KEY"
+            cat > ./.ec2_key.pem <<'EOF'
+${{ secrets.EC2_SSH_KEY }}
+EOF
+          fi
+          chmod 600 ./.ec2_key.pem
+          ssh-keygen -y -f ./.ec2_key.pem > /dev/null
 
       - name: Upload deploy files
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: ./.ec2_key.pem
           source: 'docker-compose.backend.yml'
           target: '~/orion-chat-backend'
 
@@ -89,7 +104,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key_path: ./.ec2_key.pem
           envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD
           script: |
             set -e
@@ -103,3 +118,7 @@ jobs:
             docker image prune -f
 
             echo "Deploy success with image: $DOCKER_IMAGE"
+
+      - name: Cleanup SSH key file
+        if: always()
+        run: rm -f ./.ec2_key.pem
