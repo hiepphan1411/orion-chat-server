@@ -84,12 +84,18 @@ jobs:
           chmod 600 ./.ec2_key.pem
           ssh-keygen -y -f ./.ec2_key.pem > /dev/null
 
+          {
+            echo "EC2_SSH_KEY_DECODED<<EOF"
+            cat ./.ec2_key.pem
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
       - name: Upload deploy files
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key_path: ./.ec2_key.pem
+          key: ${{ env.EC2_SSH_KEY_DECODED }}
           source: 'docker-compose.backend.yml'
           target: '~/orion-chat-backend'
 
@@ -102,7 +108,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key_path: ./.ec2_key.pem
+          key: ${{ env.EC2_SSH_KEY_DECODED }}
           envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD
           script: |
             set -e
