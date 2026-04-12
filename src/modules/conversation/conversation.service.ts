@@ -37,6 +37,13 @@ type MessageDetail = {
   mediaUrl?: string;
   fileName?: string;
   fileSize?: number;
+  callData?: {
+    callType?: 'audio' | 'video';
+    callStatus?: 'completed' | 'missed' | 'declined';
+    duration?: number;
+    isInitiator?: boolean;
+    wasRejected?: boolean;
+  } | null;
 };
 
 type LastMessageAggregateRow = {

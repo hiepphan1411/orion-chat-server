@@ -334,6 +334,8 @@ export class MessageService {
         return MessageType.VIDEO;
       case MessageType.AUDIO:
         return MessageType.AUDIO;
+      case MessageType.CALL:
+        return 'CALL' as MessageType;
       case MessageType.VOICE_MESSAGE:
         return MessageType.VOICE_MESSAGE;
       case MessageType.STICKER:

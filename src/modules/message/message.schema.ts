@@ -86,6 +86,30 @@ export class Message {
   messageType: MessageType;
 
   @Prop({
+    type: {
+      callType: {
+        type: String,
+        enum: ['audio', 'video'],
+      },
+      callStatus: {
+        type: String,
+        enum: ['completed', 'missed', 'declined'],
+      },
+      duration: { type: Number },
+      isInitiator: { type: Boolean },
+      wasRejected: { type: Boolean },
+    },
+    default: null,
+  })
+  callData?: {
+    callType?: 'audio' | 'video';
+    callStatus?: 'completed' | 'missed' | 'declined';
+    duration?: number;
+    isInitiator?: boolean;
+    wasRejected?: boolean;
+  } | null;
+
+  @Prop({
     type: String,
     enum: MessageStatus,
     default: MessageStatus.SENT,

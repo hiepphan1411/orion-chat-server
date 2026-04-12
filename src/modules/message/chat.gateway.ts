@@ -20,7 +20,13 @@ import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
 import { MessageType } from 'src/common/enums/message-type.enum';
 
-type ChatClientMessageType = 'text' | 'image' | 'file' | 'audio' | 'video';
+type ChatClientMessageType =
+  | 'text'
+  | 'image'
+  | 'file'
+  | 'audio'
+  | 'video'
+  | 'call';
 
 const onlineUsers = new Map<string, string>();
 
@@ -175,6 +181,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     clientMessageId?: string;
     replyToMessageId?: string;
     messageStatus?: string;
+    callData?: {
+      callType?: 'audio' | 'video';
+      callStatus?: 'completed' | 'missed' | 'declined';
+      duration?: number;
+      isInitiator?: boolean;
+      wasRejected?: boolean;
+    } | null;
   }) {
     this.server
       .to(`conversation:${payload.conversationId}`)
@@ -192,6 +205,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           clientMessageId: payload.clientMessageId,
           replyToMessageId: payload.replyToMessageId,
           messageStatus: payload.messageStatus,
+          callData: payload.callData || null,
         },
       });
   }
@@ -238,12 +252,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clientMessageId: string;
       conversationId: string;
       receiverId: string;
-      type: 'text' | 'image' | 'file' | 'audio';
+      type: 'text' | 'image' | 'file' | 'audio' | 'call';
       content: string;
       mediaUrl?: string;
       fileName?: string;
       fileSize?: number;
       replyToMessageId?: string;
+      callData?: {
+        callType?: 'audio' | 'video';
+        callStatus?: 'completed' | 'missed' | 'declined';
+        duration?: number;
+        isInitiator?: boolean;
+        wasRejected?: boolean;
+      };
     },
   ) {
     try {
@@ -280,6 +301,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         replyToMessageId: data.replyToMessageId,
         clientMessageId: data.clientMessageId,
         messageStatus: 'SENT',
+        callData: data.callData || null,
       });
 
       this.logger.log(`[ChatGateway] Message created: ${message._id}`);
@@ -314,6 +336,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         clientMessageId: data.clientMessageId,
         replyToMessageId: data.replyToMessageId,
         messageStatus: 'SENT',
+        callData: data.callData || null,
       });
 
       // ACK back to sender
