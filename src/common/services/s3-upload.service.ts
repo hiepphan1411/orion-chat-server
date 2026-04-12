@@ -25,10 +25,6 @@ export class S3UploadService {
     this.bucket = this.mustGet('AWS_S3_BUCKET');
     this.region =
       this.configService.get<string>('AWS_REGION') || 'ap-southeast-1';
-    this.publicBaseUrl = this.configService.get<string>(
-      'AWS_S3_PUBLIC_BASE_URL',
-    );
-
     const endpoint = this.configService.get<string>('AWS_S3_ENDPOINT');
     const forcePathStyle =
       this.configService.get<string>('AWS_S3_FORCE_PATH_STYLE') === 'true';
