@@ -34,7 +34,7 @@ const activeCalls = new Map<string, { callerId: string; receiverId: string }>();
 })
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private logger = new Logger('CallGateway');
 
@@ -384,6 +384,56 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     } catch (error) {
       this.logger.error('Error toggling media:', error);
+    }
+  }
+
+  // event 9: gửi yêu cầu nâng cấp từ audio call lên video call
+  @SubscribeMessage('call:request-video-upgrade')
+  handleRequestVideoUpgrade(
+    @MessageBody()
+    data: {
+      callId: string;
+      targetUserId: string;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, targetUserId } = data;
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (!targetSocketId) return;
+
+      this.server.to(targetSocketId).emit('call:video-upgrade-request', {
+        callId,
+        requesterId: client.handshake.query.userId,
+      });
+    } catch (error) {
+      this.logger.error('Error requesting video upgrade:', error);
+    }
+  }
+
+  // event 10: phản hồi yêu cầu nâng cấp video call
+  @SubscribeMessage('call:respond-video-upgrade')
+  handleRespondVideoUpgrade(
+    @MessageBody()
+    data: {
+      callId: string;
+      targetUserId: string;
+      accepted: boolean;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, targetUserId, accepted } = data;
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (!targetSocketId) return;
+
+      this.server.to(targetSocketId).emit('call:video-upgrade-response', {
+        callId,
+        responderId: client.handshake.query.userId,
+        accepted,
+      });
+    } catch (error) {
+      this.logger.error('Error responding video upgrade:', error);
     }
   }
 }
