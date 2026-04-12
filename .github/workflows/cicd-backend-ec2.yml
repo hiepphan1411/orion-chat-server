@@ -70,6 +70,10 @@ jobs:
             echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
             exit 1
           fi
+          if [ -n "${{ secrets.EC2_SSH_KEY }}" ] && [ -n "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+            echo "Both EC2_SSH_KEY and EC2_SSH_KEY_B64 are set. Keep only one to avoid using a stale key."
+            exit 1
+          fi
 
       - name: Prepare SSH private key file
         run: |
@@ -88,6 +92,7 @@ jobs:
 
           chmod 600 ./.ec2_key.pem
           ssh-keygen -y -f ./.ec2_key.pem > /dev/null
+          echo "Loaded SSH key fingerprint: $(ssh-keygen -lf ./.ec2_key.pem | awk '{print $2, $4}')"
 
           {
             echo "EC2_SSH_KEY_DECODED<<EOF"
@@ -106,6 +111,8 @@ jobs:
           ssh -i ./.ec2_key.pem \
             -o StrictHostKeyChecking=no \
             -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
             -o ConnectTimeout=15 \
             -p "$SSH_PORT" \
             "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
