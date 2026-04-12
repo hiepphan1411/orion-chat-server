@@ -3,12 +3,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import bcrypt from 'bcrypt';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { S3UploadService } from 'src/common/services/s3-upload.service';
 
 //Để test
 
@@ -29,6 +31,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private readonly configService: ConfigService,
+    private readonly s3UploadService: S3UploadService,
   ) {}
 
   private toSafeUser(user: User) {
@@ -139,23 +143,17 @@ export class UsersService {
 
     // Handle uploaded files
     if (uploadedFiles?.avatar) {
-      const filename = uploadedFiles.avatar.filename;
-
-      if (!filename) {
-        throw new BadRequestException('Avatar upload failed');
-      }
-
-      user.avatarUrl = `/uploads/avatars/${filename}`;
+      user.avatarUrl = await this.uploadProfileImage(
+        uploadedFiles.avatar,
+        'avatars',
+      );
     }
 
     if (uploadedFiles?.cover) {
-      const filename = uploadedFiles.cover.filename;
-
-      if (!filename) {
-        throw new BadRequestException('Cover upload failed');
-      }
-
-      user.coverImage = `/uploads/covers/${filename}`;
+      user.coverImage = await this.uploadProfileImage(
+        uploadedFiles.cover,
+        'covers',
+      );
     }
 
     const updatedUser = await this.userRepository.save(user);
@@ -166,5 +164,51 @@ export class UsersService {
       data: this.toSafeUser(updatedUser),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private async uploadProfileImage(
+    file: UploadedFile,
+    keyPrefix: string,
+  ): Promise<string> {
+    if (!file?.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Image file buffer is required');
+    }
+
+    const region = this.configService.get<string>('AWS_REGION') ||
+      this.configService.get<string>('S3_REGION') ||
+      this.configService.get<string>('REGION');
+    const accessKey = this.configService.get<string>('AWS_ACCESS_KEY_ID') ||
+      this.configService.get<string>('S3_ACCESS_KEY_ID') ||
+      this.configService.get<string>('ACCESS_KEY');
+    const secretKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY') ||
+      this.configService.get<string>('S3_SECRET_ACCESS_KEY') ||
+      this.configService.get<string>('SECRET_KEY');
+    const bucketName = this.configService.get<string>('AWS_S3_BUCKET') ||
+      this.configService.get<string>('S3_BUCKET_NAME') ||
+      this.configService.get<string>('S3_BUCKET') ||
+      this.configService.get<string>('BUCKET_NAME');
+
+    if (!region || !accessKey || !secretKey || !bucketName) {
+      throw new BadRequestException(
+        'Missing S3 configuration: region, access key, secret key and bucket name are required',
+      );
+    }
+
+    const result = await this.s3UploadService.uploadImageToS3({
+      credentials: {
+        region,
+        accessKey,
+        secretKey,
+      },
+      bucketName,
+      file: {
+        buffer: file.buffer,
+        mimetype: file.mimetype,
+        originalname: file.originalname,
+      },
+      keyPrefix,
+    });
+
+    return result.url;
   }
 }

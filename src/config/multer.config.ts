@@ -1,41 +1,17 @@
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage, type StorageEngine } from 'multer';
 
-const uploadDir = 'uploads';
-
-// Tạo thư mục uploads nếu chưa tồn tại
-if (!existsSync(uploadDir)) {
-  mkdirSync(uploadDir, { recursive: true });
-}
-
-if (!existsSync('uploads/avatars')) {
-  mkdirSync('uploads/avatars', { recursive: true });
-}
-
-if (!existsSync('uploads/covers')) {
-  mkdirSync('uploads/covers', { recursive: true });
-}
+type UploadedMulterFile = {
+  mimetype: string;
+};
 
 export const multerConfig = {
-  storage: diskStorage({
-    destination: (req, file, cb) => {
-      if (file.fieldname === 'avatar') {
-        cb(null, 'uploads/avatars');
-      } else if (file.fieldname === 'cover') {
-        cb(null, 'uploads/covers');
-      } else {
-        cb(null, 'uploads');
-      }
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      const ext = extname(file.originalname);
-      const name = file.originalname.replace(ext, '');
-      cb(null, `${name}-${uniqueSuffix}${ext}`);
-    },
-  }),
-  fileFilter: (req, file, cb) => {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  storage: (memoryStorage as unknown as () => StorageEngine)(),
+  fileFilter: (
+    _req: unknown,
+    file: UploadedMulterFile,
+    cb: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
     // Chỉ cho phép hình ảnh
     const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (allowedMimes.includes(file.mimetype)) {
