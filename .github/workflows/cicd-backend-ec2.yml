@@ -79,9 +79,7 @@ jobs:
             echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > ./.ec2_key.pem
           else
             echo "Using EC2_SSH_KEY"
-            cat > ./.ec2_key.pem <<'EOF'
-${{ secrets.EC2_SSH_KEY }}
-EOF
+            printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ./.ec2_key.pem
           fi
           chmod 600 ./.ec2_key.pem
           ssh-keygen -y -f ./.ec2_key.pem > /dev/null
