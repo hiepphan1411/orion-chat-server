@@ -207,15 +207,14 @@ export class FriendsService {
     });
   }
 
-
-/**
- * Lấy chi tiết profile của một bạn bè
- *
- * Kiểm tra:
- * - userId và friendId có tồn tại không
- * - Họ có phải bạn bè không
- * - Return thông tin chi tiết của bạn bè
- */
+  /**
+   * Lấy chi tiết profile của một bạn bè
+   *
+   * Kiểm tra:
+   * - userId và friendId có tồn tại không
+   * - Họ có phải bạn bè không
+   * - Return thông tin chi tiết của bạn bè
+   */
   async getFriendProfile(userId: string, friendId: string) {
     if (userId === friendId) {
       throw new BadRequestException('Invalid friend identifier');
@@ -245,16 +244,6 @@ export class FriendsService {
       friendshipSince: friendship.createdAt,
     };
   }
-
-    /**
-     * Lấy danh sách bạn bè bị chặn (người dùng hiện tại chặn)
-     * TODO:
-     */
-    async getBlockedFriends(userId: string) {
-        // TODO: Khi có bảng Blocked, query từ bảng đó
-        // Hiện tại chỉ có blocking ở cấp conversation
-        return [];
-    }
 
   async removeFriend(userId: string, friendId: string) {
     if (userId === friendId) {

@@ -644,7 +644,7 @@ export class ConversationController {
       throw new BadRequestException('User ID is required');
     }
 
-    return this.conversationService.pinConversation(
+    return await this.conversationService.pinConversation(
       conversationId,
       user.userId,
     );
@@ -663,7 +663,7 @@ export class ConversationController {
       throw new BadRequestException('User ID is required');
     }
 
-    return this.conversationService.unpinConversation(
+    return await this.conversationService.unpinConversation(
       conversationId,
       user.userId,
     );

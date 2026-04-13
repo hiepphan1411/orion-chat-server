@@ -10,7 +10,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject, Res } from '@nestjs/common';
+import { Logger, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
@@ -18,16 +18,6 @@ import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
-import { MessageType } from 'src/common/enums/message-type.enum';
-
-type ChatClientMessageType =
-  | 'text'
-  | 'image'
-  | 'file'
-  | 'audio'
-  | 'video'
-  | 'call';
-
 const onlineUsers = new Map<string, string>();
 
 @WebSocketGateway({
