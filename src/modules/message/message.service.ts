@@ -10,12 +10,14 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { Message, MessageDocument } from './message.schema';
+import { ChatGateway } from './chat.gateway';
 
 @Injectable()
 export class MessageService {
   constructor(
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async findAll(): Promise<MessageDocument[]> {
@@ -217,6 +219,12 @@ export class MessageService {
       { $addToSet: { deletedForUsers: payload.userId } },
     );
 
+    this.chatGateway.emitMessageDeleted({
+      conversationId: String(message.conversationId),
+      messageId: String(payload.messageId),
+      deletedBy: payload.userId,
+    });
+
     const alreadyDeletedForMe =
       Array.isArray(message.deletedForUsers) &&
       message.deletedForUsers.includes(payload.userId);
@@ -334,6 +342,8 @@ export class MessageService {
         return MessageType.VIDEO;
       case MessageType.AUDIO:
         return MessageType.AUDIO;
+      case MessageType.CALL:
+        return 'CALL' as MessageType;
       case MessageType.VOICE_MESSAGE:
         return MessageType.VOICE_MESSAGE;
       case MessageType.STICKER:

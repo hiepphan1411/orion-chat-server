@@ -37,6 +37,13 @@ type MessageDetail = {
   mediaUrl?: string;
   fileName?: string;
   fileSize?: number;
+  callData?: {
+    callType?: 'audio' | 'video';
+    callStatus?: 'completed' | 'missed' | 'declined';
+    duration?: number;
+    isInitiator?: boolean;
+    wasRejected?: boolean;
+  } | null;
 };
 
 type LastMessageAggregateRow = {
@@ -197,15 +204,15 @@ export class ConversationService {
       );
     }
 
-    if (currentUserId === recipientId) {
-      throw new BadRequestException('Cannot create conversation with yourself');
-    }
+      if (currentUserId === recipientId) {
+          throw new BadRequestException('Cannot create conversation with yourself');
+      }
 
     // Validate UUIDs
     this.validateUUID(currentUserId, 'currentUserId');
     this.validateUUID(recipientId, 'recipientId');
 
-    // ✅ Check if recipient exists
+    // Check if recipient exists
     const recipient = await this.userRepo.findOne({
       where: { userId: recipientId },
     });
@@ -214,7 +221,7 @@ export class ConversationService {
       throw new NotFoundException(`Recipient not found: ${recipientId}`);
     }
 
-    // ✅ Try to find existing PRIVATE conversation between currentUserId and recipientId
+    // Try to find existing PRIVATE conversation
     const existingConversations = await this.participantRepo.find({
       where: { userId: currentUserId },
       relations: ['conversation', 'conversation.participants'],
@@ -223,31 +230,38 @@ export class ConversationService {
     const existingPrivate = existingConversations.find((conv) => {
       const conversation = conv.conversation;
 
-      // ✅ Must be PRIVATE type
+      // Must be PRIVATE type
       if (conversation.type !== ConversationType.PRIVATE) return false;
 
-      // ✅ Must have exactly 2 participants
-      if (conversation.participants.length !== 2) return false;
-
-      // ✅ Check if recipientId is the other participant
-      return conversation.participants.some((p) => p.userId === recipientId);
+      // Check if other participant is recipientId
+      return conversation.participants.length === 2;
     });
 
     if (existingPrivate) {
-      // ✅ Return existing conversation detail
-      return this.findDetailById(
-        existingPrivate.conversation.conversationId,
-        currentUserId,
-      );
+      // Verify the other participant is recipientId
+      const otherParticipantExists = await this.participantRepo.findOne({
+        where: {
+          conversationId: existingPrivate.conversation.conversationId,
+          userId: recipientId,
+        },
+      });
+
+      if (otherParticipantExists) {
+        // Return existing conversation detail
+        return this.findDetailById(
+          existingPrivate.conversation.conversationId,
+          currentUserId,
+        );
+      }
     }
 
-    // ✅ Create NEW private conversation
+    // Create NEW private conversation
     const newConversation = this.conversationRepo.create({
       type: ConversationType.PRIVATE,
     });
     const savedConversation = await this.conversationRepo.save(newConversation);
 
-    // ✅ Add participants
+    // Add participants
     await this.participantRepo.save([
       {
         conversationId: savedConversation.conversationId,
@@ -259,7 +273,7 @@ export class ConversationService {
       },
     ]);
 
-    // ✅ Return conversation detail with block status
+    // Return conversation detail with block status
     const membership = await this.participantRepo.findOne({
       where: {
         conversationId: savedConversation.conversationId,

@@ -207,6 +207,14 @@ export class FriendsService {
     });
   }
 
+  /**
+   * Lấy chi tiết profile của một bạn bè
+   *
+   * Kiểm tra:
+   * - userId và friendId có tồn tại không
+   * - Họ có phải bạn bè không
+   * - Return thông tin chi tiết của bạn bè
+   */
   async getFriendProfile(userId: string, friendId: string) {
     if (userId === friendId) {
       throw new BadRequestException('Invalid friend identifier');

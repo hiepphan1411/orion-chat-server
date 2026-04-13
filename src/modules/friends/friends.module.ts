@@ -5,9 +5,13 @@ import { User } from '../users/entities/user.entity';
 import { GroupMember } from '../group-member/entities/group-member.entity';
 import { FriendsController } from './friends.controller';
 import { FriendsService } from './friends.service';
+import { CommonModule } from 'src/common/common.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Friendship, User, GroupMember])],
+  imports: [
+    TypeOrmModule.forFeature([Friendship, User, GroupMember]),
+    CommonModule,
+  ],
   controllers: [FriendsController],
   providers: [FriendsService],
 })
