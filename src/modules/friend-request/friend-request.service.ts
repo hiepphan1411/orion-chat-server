@@ -81,6 +81,9 @@ export class FriendRequestService {
     return this.requestRepo.save(request);
   }
 
+  /**
+   * Lấy danh sách lời mời kết bạn đến (từ người khác gửi)
+   */
   async getIncoming(userId: string): Promise<FriendRequest[]> {
     return this.requestRepo.find({
       where: {
@@ -91,13 +94,15 @@ export class FriendRequestService {
     });
   }
 
+  /**
+   * Lấy danh sách lời mời kết bạn đi (mình gửi cho người khác)
+   */
   async getOutgoing(userId: string): Promise<FriendRequest[]> {
     return this.requestRepo.find({
       where: {
         sender: { userId },
         status: FriendRequestStatus.PENDING,
       },
-      relations: ['receiver'],
       order: { createdAt: 'DESC' },
     });
   }

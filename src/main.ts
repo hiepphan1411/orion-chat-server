@@ -19,6 +19,7 @@ async function bootstrap() {
     'https://d1m0lu9iwqsfsh.cloudfront.net',
     'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com',
     'https://deceitfully-unquailing-haylee.ngrok-free.dev',
+    'https://foveate-tristan-disepalous.ngrok-free.dev',
   ];
 
   app.use(json({ limit: '10mb' }));

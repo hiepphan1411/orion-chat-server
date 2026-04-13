@@ -10,7 +10,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, Res } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
@@ -39,6 +39,7 @@ const onlineUsers = new Map<string, string>();
       'http://localhost:5174',
       'http://localhost:3001',
       'https://deceitfully-unquailing-haylee.ngrok-free.dev',
+      'https://foveate-tristan-disepalous.ngrok-free.dev',
       'https://d1m0lu9iwqsfsh.cloudfront.net',
       'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com',
     ],
@@ -138,7 +139,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ==================== Emit methods (giữ nguyên) ====================
+  // ==================== Emit methods ====================
+
+  /**
+   * Broadcast khi có ai đó react/unreact vào message
+   *
+   * @param payload
+   * messageId: ID của message bị react/unreact
+   * conversationId: ID của conversation chứa message đó
+   * reactions: Danh sách reactions mới nhất của message đó (sau khi đã được cập nhật)
+   * actedBy: userId của người vừa react/unreact
+   * action: 'set' nếu là react, 'remove' nếu là unreact
+   */
   emitMessageReactionUpdated(payload: {
     conversationId: string;
     messageId: string;
@@ -155,6 +167,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  /**
+   * Broadcast khi có ai đó recall (thu hồi) một message
+   *
+   * @param payload
+   * conversationId: ID của conversation chứa message đó
+   * messageId: ID của message bị recall
+   * revokedBy: userId của người vừa recall message đó
+   * revokedAt: timestamp khi message bị recall
+   * isRevoked: true nếu message đã bị recall, false nếu đã được un-recall (hoàn tác)
+   */
   emitMessageRecalled(payload: {
     conversationId: string;
     messageId: string;
@@ -166,6 +188,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .emit('chat:message_recalled', {
         ...payload,
         isRevoked: true,
+      });
+  }
+
+  emitMessageDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_deleted', {
+        ...payload,
+        isDeleted: true,
+        at: new Date().toISOString(),
       });
   }
 
@@ -212,9 +248,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Các @SubscribeMessage còn lại **giữ nguyên hoàn toàn** như code cũ của bạn
   // (handleJoinConversation, handleSendMessage, handleTyping, handleFetchMessages, ...)
-
   @SubscribeMessage('chat:join_conversation')
-  async handleJoinConversation(
+  handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { requestId: string; conversationId: string },
   ) {
@@ -267,6 +302,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     },
   ) {
+    this.logger.log(`RECEIVED MESSAGE: ${JSON.stringify(data)}`);
+
     try {
       this.logger.log(
         `[ChatGateway] Sending message in conversation: ${data.conversationId}`,
@@ -339,7 +376,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         callData: data.callData || null,
       });
 
-      // ACK back to sender
+      // ACK back to sender via return (Socket.io auto-invokes callback)
       return {
         ok: true,
         requestId: data.requestId,
@@ -353,19 +390,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.error('Error sending message:', error);
       return {
         ok: false,
-        requestId: data.requestId,
         error: {
           code: 'SEND_FAILED',
           message: error instanceof Error ? error.message : 'Send failed',
-          retriable: true,
-          details: { clientMessageId: data.clientMessageId },
         },
       };
     }
   }
 
   @SubscribeMessage('chat:typing')
-  async handleTyping(
+  handleTyping(
     @ConnectedSocket() client: Socket,
     @MessageBody()
     data: {

@@ -34,6 +34,23 @@ export class ConversationController {
     private readonly chatGateway: ChatGateway,
   ) {}
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONVERSATION MANAGEMENT - Lấy/Tạo conversations
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Lấy danh sách all conversations của user hiện tại
+   *
+   * @route GET /conversations
+   * @returns {ConversationResponse[]} Mảng các conversations (private + group)
+   *
+   * Response fields:
+   * - conversationId: UUID của conversation
+   * - type: "PRIVATE" hoặc "GROUP"
+   * - participants: Danh sách participants
+   * - lastMessage: Tin nhắn cuối (nếu có)
+   * - blockStatus: Trạng thái block
+   */
   @Get()
   async getAllByUser(@CurrentUser() user: JwtPayload) {
     if (!user?.userId) throw new BadRequestException('User ID is required');
@@ -41,9 +58,19 @@ export class ConversationController {
   }
 
   /**
-   * Get or create a PRIVATE conversation with a friend
+   * Lấy HOẶC TẠO mới PRIVATE conversation (1:1 chat) với một bạn bè
+   *
    * @route POST /conversations/private
-   * @param recipientId ID của friend
+   * @param {string} recipientId UUID của friend muốn chat với
+   * @returns {ConversationResponse} Conversation object
+   *
+   * Response fields:
+   * - conversationId
+   * - type: "PRIVATE" TODO: luôn là private conversation
+   * - participants: 2 users với full info (userId, fullName, avatarUrl, etc)
+   * - lastMessage: Tin nhắn cuối (nếu có)
+   * - blockStatus: Thông tin block (quan trọng cho security)
+   * - canUnblock: Có thể bỏ block không
    */
   @Post('private')
   async getOrCreatePrivateConversation(
@@ -70,6 +97,14 @@ export class ConversationController {
     }
   }
 
+  /**
+   * Lấy chi tiết MỘT conversation (bao gồm block status, settings, etc)
+   *
+   * @route GET /conversations/:conversationId
+   * @param {string} conversationId UUID của conversation
+   * @returns {ConversationResponse} Chi tiết conversation + trạng thái của current user
+   *
+   */
   @Get(':conversationId')
   async getConversationDetail(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -90,6 +125,23 @@ export class ConversationController {
     }
   }
 
+  /**
+   * Lấy danh sách TIN NHẮN trong một conversation (pagination)
+   *
+   * @route GET /conversations/:conversationId/messages?limit=50&cursor=lastMessageId
+   * @param {string} conversationId
+   * @param {string} cursor Message ID
+   * @param {string} limit Số tin nhắn muốn lấy (default = 30)
+   * @returns {MessageResponse[]} Mảng tin nhắn
+   *
+   * Message response fields:
+   * - messageId / _id: UUID của message
+   * - senderBy: UUID của người gửi
+   * - content: Nội dung tin nhắn
+   * - messageType: "TEXT" | "IMAGE" | etc
+   * - messageStatus: "SENT" | "READ" | etc
+   * - createdAt: Timestamp
+   */
   @Get(':conversationId/messages')
   async getConversationMessages(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -114,6 +166,30 @@ export class ConversationController {
     }
   }
 
+  /**
+   * Gửi TIN NHẮN mới trong conversation (REST API fallback)
+   *
+   * Note: Frontend nên dùng WebSocket (socket.io) cho real-time
+   *          Endpoint này là fallback khi WebSocket chưa sẵn sàng
+   *
+   * Luồng:
+   * 1. Server lưu message vào MongoDB
+   * 2. Server trả về response với messageId (server-side ID)
+   * 3. Server emit real-time event qua WebSocket cho tất cả users trong conversation
+   *
+   * @route POST /conversations/:conversationId/messages
+   * @param {string} conversationId UUID của conversation
+   * @param {string} content Nội dung tin nhắn (bắt buộc)
+   * @param {string} messageType "TEXT" | "IMAGE" | "FILE" (default = "TEXT")
+   * @param {string} clientMessageId UUID tạo bởi client (cho tracking)
+   * @returns {MessageResponse} Tin nhắn vừa tạo
+   *
+   * Response:
+   * - messageId: Server ID (frontend update local ID thành cái này)
+   * - senderBy: UUID người gửi
+   * - content: Nội dung
+   * - createdAt: Timestamp server
+   */
   @Post(':conversationId/messages')
   async createConversationMessage(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -161,7 +237,17 @@ export class ConversationController {
     return message;
   }
 
-  // ==================== Message Reactions ====================
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MESSAGE REACTIONS - Thêm/xóa emoji reaction
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Thêm EMOJI reaction cho một tin nhắn
+   *
+   * @route POST /conversations/:conversationId/messages/:messageId/reactions
+   * @param {string} emoji
+   * @returns {reactions[]} Danh sách tất cả reactions trên message đó
+   */
   @Post(':conversationId/messages/:messageId/reactions')
   async reactToMessage(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -195,6 +281,11 @@ export class ConversationController {
     return result;
   }
 
+  /**
+   * XÓA reaction của bạn khỏi một tin nhắn
+   *
+   * @route DELETE /conversations/:conversationId/messages/:messageId/reactions
+   */
   @Delete(':conversationId/messages/:messageId/reactions')
   async removeReaction(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -222,7 +313,18 @@ export class ConversationController {
     return result;
   }
 
-  // ==================== Message Recall ====================
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MESSAGE MANAGEMENT - Recall, Delete, Forward
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * THU HỒI tin nhắn (xóa cho TẤT CẢ users)
+   *
+   * Constraint: Chỉ người gửi mới có thể thu hồi + trong 5 phút
+   *
+   * @route POST /conversations/:conversationId/messages/:messageId/recall
+   * @returns {success: boolean}
+   */
   @Post(':conversationId/messages/:messageId/recall')
   async recallMessage(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -249,7 +351,16 @@ export class ConversationController {
     return result;
   }
 
-  // ==================== Message Delete ====================
+  /**
+   * XÓA tin nhắn CHỈ cho bản thân (hide message)
+   *
+   * Khác với RECALL:
+   * - Delete: Chỉ bạn không thấy nó (soft delete)
+   * - Recall: Tất cả users không thấy nó (hard delete)
+   *
+   * @route DELETE /conversations/:conversationId/messages/:messageId
+   * @returns {success: boolean}
+   */
   @Delete(':conversationId/messages/:messageId')
   async deleteMessage(
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
@@ -269,7 +380,14 @@ export class ConversationController {
     return result;
   }
 
-  // ==================== Message Forward ====================
+  /**
+   * FORWARD tin nhắn từ conversation này sang conversation khác
+   *
+   * @route POST /conversations/:conversationId/messages/forward
+   * @param {string} sourceMessageId Message ID cần forward (từ conversation khác)
+   * @param {string} content Nội dung append thêm (optional)
+   * @returns {MessageResponse} Tin nhắn forward mới
+   */
   @Post(':conversationId/messages/forward')
   async forwardMessage(
     @Param('conversationId', ParseUUIDPipe) targetConversationId: string,
@@ -310,11 +428,18 @@ export class ConversationController {
     return result;
   }
 
-  // ==================== SECURITY FEATURES ====================
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SECURITY FEATURES - Auto-delete, Hide, Block/Unblock
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Cập nhật thời gian tự xóa tin nhắn cho conversation
+   * Cập nhật TIME TỰ XÓA tin nhắn cho conversation
+   *
+   * Ứng dụng: Conversation bảo mật (disappearing messages)
+   * Khi enable: Tin nhắn sẽ tự xóa sau X giây
+   *
    * @route PATCH /conversations/:conversationId/auto-delete-duration
+   * @param {number} autoDeleteDuration Thời gian tính bằng giây (0 = disable)
    */
   @Patch(':conversationId/auto-delete-duration')
   async updateAutoDeleteDuration(
@@ -334,8 +459,10 @@ export class ConversationController {
   }
 
   /**
-   * Ẩn conversation bằng mật khẩu
+   * ẨN conversation bằng mật khẩu
+   *
    * @route POST /conversations/:conversationId/hide
+   * @param {string} password Mật khẩu để ẩn
    */
   @Post(':conversationId/hide')
   async hideConversation(
@@ -355,8 +482,10 @@ export class ConversationController {
   }
 
   /**
-   * Tiết lộ conversation bị ẩn bằng mật khẩu
+   * MỞ KHÓA conversation (tiết lộ sau khi ẩn)
+   *
    * @route POST /conversations/:conversationId/reveal
+   * @param {string} password Mật khẩu để mở khóa
    */
   @Post(':conversationId/reveal')
   async revealConversation(
@@ -376,8 +505,12 @@ export class ConversationController {
   }
 
   /**
-   * Xóa toàn bộ lịch sử chat cho user hiện tại (soft delete)
+   * XÓA TOÀN BỘ lịch sử chat (chỉ cho bản thân)
+   *
+   * Chú ý: Chỉ soft delete - tin nhắn vẫn có trong DB (tồn tại cho người khác)
+   *
    * @route POST /conversations/:conversationId/clear-history
+   * @returns {success: boolean}
    */
   @Post(':conversationId/clear-history')
   async clearChatHistory(
@@ -395,11 +528,14 @@ export class ConversationController {
   }
 
   /**
-   * Chặn người dùng trong cuộc hội thoại
-   * Chỉ áp dụng cho PRIVATE conversation (1:1 chat)
-   * Tự động chặn người kia (vì PRIVATE conversation chỉ có 2 người)
+   * CHẶN người dùng trong conversation
+   *
+   * Chỉ áp dụng cho PRIVATE conversation (1:1 chat):
+   * - Chặn: Không nhận được tin nhắn từ người bị chặn
+   * - Người bị chặn vẫn có thể nhắn nhưng tin nhắn sẽ bị mute
    *
    * @route POST /conversations/:conversationId/block
+   * @returns {blockStatus} Trạng thái block sau khi chặn
    */
   @Post(':conversationId/block')
   async blockUser(
@@ -417,10 +553,12 @@ export class ConversationController {
   }
 
   /**
-   * Bỏ chặn người dùng trong cuộc hội thoại
-   * Chỉ người chặn mới có thể bỏ chặn
+   * BỎ CHẶN người dùng (unblock)
+   *
+   * Constraint: Chỉ NGƯỜI CHẶN mới có thể bỏ chặn
    *
    * @route POST /conversations/:conversationId/unblock
+   * @returns {blockStatus} Trạng thái block sau khi bỏ chặn
    */
   @Post(':conversationId/unblock')
   async unblockUser(
@@ -438,15 +576,18 @@ export class ConversationController {
   }
 
   /**
-   * Kiểm tra trạng thái chặn của conversation
-   * Thông tin:
-   * - isBlocked: có ai bị chặn trong conversation không
-   * - blockedUserId: userId của người bị chặn (nếu có)
-   * - blockedBy: userId của người chặn (nếu có)
-   * - canUnblock: current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
-   * - disableCall: nếu current user bị chặn thì disable call/video features
+   * KIỂM TRA trạng thái block của conversation
+   *
+   * Response fields:
+   * - isBlocked: Có ai bị chặn trong conversation không
+   * - blockedUserId: UUID của NGƯỜI BỊ CHẶN (nếu có)
+   * - blockedBy: UUID của NGƯỜI CHẶN (nếu có)
+   * - canUnblock: Current user có thể bỏ chặn không? (chỉ người chặn mới có thể)
+   * - iAmBlocked: Current user bị chặn không? (dùng để disable call/video)
+   * - iAmTheBlocker: Current user là người chặn không?
    *
    * @route GET /conversations/:conversationId/block-status
+   * @returns {blockStatus} Chi tiết trạng thái block
    */
   @Get(':conversationId/block-status')
   async getMyBlockStatus(
@@ -470,15 +611,15 @@ export class ConversationController {
 
     return {
       conversationId,
-      // ✅ Trạng thái chặn của conversation
+      // Trạng thái chặn của conversation
       isBlocked: blockStatus.isBlocked,
       blockedUserId: blockStatus.blockedUserId, // UUID của người BỊ CHẶN
       blockedBy: blockStatus.blockedBy, // UUID của NGƯỜI CHẶN
       blockedAt: blockStatus.blockedAt,
-      // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể)
+      // Current user có thể bỏ chặn không (chỉ người chặn mới có thể)
       canUnblock:
         blockStatus.isBlocked && blockStatus.blockedBy === user.userId,
-      // ✅ Current user bị chặn không (disable call/video features)
+      // Current user bị chặn không (disable call/video features)
       iAmBlocked:
         blockStatus.isBlocked && blockStatus.blockedUserId === user.userId,
       // Backend helper cho FE
