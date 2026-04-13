@@ -163,6 +163,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isRevoked: true,
       });
   }
+  emitMessageDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_deleted', {
+        ...payload,
+        isDeleted: true,
+        at: new Date().toISOString(),
+      });
+  }
 
   emitNewMessage(payload: {
     conversationId: string;

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -7,11 +8,36 @@ import { ConfigService } from '@nestjs/config';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 
-interface UploadResult {
+export interface UploadResult {
   key: string;
   url: string;
   bucket: string;
 }
+
+export type S3UploadCredentials = {
+  region: string;
+  accessKey: string;
+  secretKey: string;
+};
+
+export type S3ImageUploadInput = {
+  credentials: S3UploadCredentials;
+  bucketName: string;
+  file: {
+    buffer?: Buffer;
+    mimetype?: string;
+    originalname?: string;
+  };
+  keyPrefix?: string;
+};
+
+export type S3ImageUploadResult = {
+  key: string;
+  url: string;
+  bucketName: string;
+  region: string;
+  etag?: string;
+};
 
 @Injectable()
 export class S3UploadService {
@@ -19,20 +45,25 @@ export class S3UploadService {
   private readonly bucket: string;
   private readonly region: string;
   private readonly publicBaseUrl?: string;
+  private readonly endpoint?: string;
+  private readonly forcePathStyle: boolean;
   private readonly s3: S3Client;
 
   constructor(private readonly configService: ConfigService) {
     this.bucket = this.mustGet('AWS_S3_BUCKET');
     this.region =
       this.configService.get<string>('AWS_REGION') || 'ap-southeast-1';
-    const endpoint = this.configService.get<string>('AWS_S3_ENDPOINT');
-    const forcePathStyle =
+    this.publicBaseUrl = this.configService.get<string>(
+      'AWS_S3_PUBLIC_BASE_URL',
+    );
+    this.endpoint = this.configService.get<string>('AWS_S3_ENDPOINT');
+    this.forcePathStyle =
       this.configService.get<string>('AWS_S3_FORCE_PATH_STYLE') === 'true';
 
     this.s3 = new S3Client({
       region: this.region,
-      endpoint,
-      forcePathStyle,
+      endpoint: this.endpoint,
+      forcePathStyle: this.forcePathStyle,
       credentials: {
         accessKeyId: this.mustGet('AWS_ACCESS_KEY_ID'),
         secretAccessKey: this.mustGet('AWS_SECRET_ACCESS_KEY'),
@@ -45,7 +76,13 @@ export class S3UploadService {
     keyPrefix = 'uploads',
   ): Promise<UploadResult> {
     const normalizedName = file.originalname.replace(/\s+/g, '-');
-    const key = `${keyPrefix}/${Date.now()}-${randomUUID()}-${normalizedName}`;
+    const key =
+      this.normalizePrefix(keyPrefix) +
+      Date.now() +
+      '-' +
+      randomUUID() +
+      '-' +
+      normalizedName;
 
     await this.s3.send(
       new PutObjectCommand({
@@ -60,25 +97,113 @@ export class S3UploadService {
     return {
       key,
       bucket: this.bucket,
-      url: this.resolvePublicUrl(key),
+      url: this.resolvePublicUrl(key, this.bucket, this.region),
     };
   }
 
-  private resolvePublicUrl(key: string): string {
-    if (this.publicBaseUrl) {
-      const base = this.publicBaseUrl.replace(/\/$/, '');
-      return `${base}/${key}`;
+  async uploadImageToS3(
+    input: S3ImageUploadInput,
+  ): Promise<S3ImageUploadResult> {
+    const { credentials, bucketName, file, keyPrefix = 'images' } = input;
+
+    if (
+      !credentials?.region ||
+      !credentials?.accessKey ||
+      !credentials?.secretKey
+    ) {
+      throw new BadRequestException(
+        'Missing S3 credentials: region, accessKey, secretKey are required',
+      );
     }
 
-    return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+    if (!bucketName) {
+      throw new BadRequestException('bucketName is required');
+    }
+
+    if (!file?.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Image file buffer is required');
+    }
+
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException(
+        'Only image files are allowed for S3 upload',
+      );
+    }
+
+    const extension = this.getFileExtension(file.originalname, file.mimetype);
+    const key =
+      this.normalizePrefix(keyPrefix) +
+      Date.now() +
+      '-' +
+      randomUUID() +
+      extension;
+
+    const client = new S3Client({
+      region: credentials.region,
+      endpoint: this.endpoint,
+      forcePathStyle: this.forcePathStyle,
+      credentials: {
+        accessKeyId: credentials.accessKey,
+        secretAccessKey: credentials.secretKey,
+      },
+    });
+
+    const response = await client.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ACL: 'public-read',
+      }),
+    );
+
+    return {
+      key,
+      bucketName,
+      region: credentials.region,
+      etag: response.ETag,
+      url: this.resolvePublicUrl(key, bucketName, credentials.region),
+    };
+  }
+
+  private resolvePublicUrl(
+    key: string,
+    bucket: string,
+    region: string,
+  ): string {
+    if (this.publicBaseUrl && bucket === this.bucket) {
+      const base = this.publicBaseUrl.replace(/\/$/, '');
+      return base + '/' + key;
+    }
+
+    return 'https://' + bucket + '.s3.' + region + '.amazonaws.com/' + key;
+  }
+
+  private normalizePrefix(prefix: string): string {
+    return prefix.replace(/^\/+|\/+$/g, '') + '/';
+  }
+
+  private getFileExtension(originalname?: string, mimetype?: string): string {
+    const fromOriginalName = originalname?.split('.').pop()?.trim();
+    if (fromOriginalName) {
+      return '.' + fromOriginalName.toLowerCase();
+    }
+
+    const fromMime = mimetype?.split('/')[1]?.split('+')[0]?.trim();
+    if (fromMime) {
+      return '.' + fromMime.toLowerCase();
+    }
+
+    return '.jpg';
   }
 
   private mustGet(key: string): string {
     const value = this.configService.get<string>(key);
     if (!value) {
-      this.logger.error(`Missing required environment variable: ${key}`);
+      this.logger.error('Missing required environment variable: ' + key);
       throw new InternalServerErrorException(
-        `Server is not configured for S3 upload: ${key}`,
+        'Server is not configured for S3 upload: ' + key,
       );
     }
 
