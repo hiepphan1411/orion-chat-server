@@ -133,7 +133,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ==================== Emit methods (giữ nguyên) ====================
+  // ==================== Emit methods ====================
+
+  /**
+   * Broadcast khi có ai đó react/unreact vào message
+   *
+   * @param payload
+   * messageId: ID của message bị react/unreact
+   * conversationId: ID của conversation chứa message đó
+   * reactions: Danh sách reactions mới nhất của message đó (sau khi đã được cập nhật)
+   * actedBy: userId của người vừa react/unreact
+   * action: 'set' nếu là react, 'remove' nếu là unreact
+   */
   emitMessageReactionUpdated(payload: {
     conversationId: string;
     messageId: string;
@@ -150,6 +161,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  /**
+   * Broadcast khi có ai đó recall (thu hồi) một message
+   *
+   * @param payload
+   * conversationId: ID của conversation chứa message đó
+   * messageId: ID của message bị recall
+   * revokedBy: userId của người vừa recall message đó
+   * revokedAt: timestamp khi message bị recall
+   * isRevoked: true nếu message đã bị recall, false nếu đã được un-recall (hoàn tác)
+   */
   emitMessageRecalled(payload: {
     conversationId: string;
     messageId: string;
@@ -161,6 +182,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .emit('chat:message_recalled', {
         ...payload,
         isRevoked: true,
+      });
+  }
+
+  emitMessageDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_deleted', {
+        ...payload,
+        isDeleted: true,
+        at: new Date().toISOString(),
       });
   }
 
