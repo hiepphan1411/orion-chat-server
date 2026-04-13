@@ -12,6 +12,7 @@ import type { Request } from 'express';
 
 interface TokenPayload {
   phoneNumber: string;
+  userId?: string;
   iat: number;
   exp: number;
 }
@@ -53,9 +54,40 @@ export class JwtSessionGuard implements CanActivate {
         throw new UnauthorizedException('Tài khoản đã bị vô hiệu hóa');
       }
 
+      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB
+      // Platform được lấy từ X-Platform header (FE gửi)
+      const platform = (request.headers['x-platform'] as string) || 'web';
+      const tokenMatchesWeb = user.webSessionToken === token;
+      const tokenMatchesMobile = user.mobileSessionToken === token;
+
+      // this.logger.debug('[Session Check] Platform from header: ' + platform);
+      // this.logger.debug(
+      //   '[Session Check] Token matches web: ' + tokenMatchesWeb,
+      // );
+      // this.logger.debug(
+      //   '[Session Check] Token matches mobile: ' + tokenMatchesMobile,
+      // );
+
+      // Kiểm tra token chỉ match với platform của request
+      if (platform === 'web' && !tokenMatchesWeb) {
+        this.logger.warn(
+          `[Session Mismatch] User ${phoneNumber} web token mismatch. Old token detected.`,
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị web khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
+      if (platform === 'mobile' && !tokenMatchesMobile) {
+        this.logger.warn(
+          `[Session Mismatch] User ${phoneNumber} mobile token mismatch. Old token detected.`,
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị mobile khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
       // Gán thông tin người dùng vào request
-      // JWT token validity sẽ được kiểm tra bởi @UseGuards(JwtAuthGuard)
-      // Logout sẽ chỉ xảy ra khi token hết hạn (exp claim)
       request.user = {
         phoneNumber: user.phoneNumber,
         userId: user.userId,

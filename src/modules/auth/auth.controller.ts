@@ -5,7 +5,10 @@ import {
   UseGuards,
   Request,
   Get,
+  BadRequestException,
+  Logger,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -18,7 +21,12 @@ import { JwtSessionGuard } from './guards/jwt-session.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  private readonly logger = new Logger('AuthController');
+
+  constructor(
+    private authService: AuthService,
+    private jwtService: JwtService,
+  ) {}
 
   private toHeaderString(value: string | string[] | undefined): string {
     if (!value) return '';
@@ -92,6 +100,23 @@ export class AuthController {
 
     const secChUa = this.toHeaderString(req.headers['sec-ch-ua']);
     const userAgent = this.toHeaderString(req.headers['user-agent']);
+    const platformHeader =
+      this.toHeaderString(req.headers['x-platform']) || 'web';
+
+    const maybePlatform =
+      typeof (body as unknown as { platform?: unknown }).platform === 'string'
+        ? (body as unknown as { platform: string }).platform
+        : undefined;
+
+    this.logger.log(
+      `[Login Controller] Full request body: ${JSON.stringify(body)}`,
+    );
+    this.logger.log(
+      `[Login Controller] x-platform header: ${platformHeader} | body.deviceType: ${body.deviceType} | body.platform: ${maybePlatform}`,
+    );
+    this.logger.log(
+      `[Login Controller] phoneNumber: ${body.phoneNumber} | hasPassword: ${Boolean(body.password)}`,
+    );
 
     const browserFromBody =
       body.deviceModel || body.deviceName?.split(' on ')[0];
@@ -102,9 +127,12 @@ export class AuthController {
     );
     const resolvedOs = body.osType || 'Unknown OS';
 
+    // Use deviceType from body if available, otherwise use X-Platform header
+    const deviceType = body.deviceType || platformHeader;
+
     return this.authService.login(body.phoneNumber, body.password, {
       deviceName: `${resolvedBrowser} on ${resolvedOs}`,
-      deviceType: body.deviceType,
+      deviceType: deviceType,
       deviceModel: resolvedBrowser,
       osType: resolvedOs,
       osVersion: body.osVersion,
@@ -117,10 +145,23 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtSessionGuard)
   logout(
-    @Request() req: { user: { phoneNumber: string } },
+    @Request() req: { user: { phoneNumber: string; userId: string } },
     @Body() body?: { platform?: string },
   ) {
-    return this.authService.logout(req.user.phoneNumber, body?.platform);
+    return this.authService.logout(req.user.userId, body?.platform);
+  }
+
+  @Post('logout-with-token')
+  logoutWithToken(@Body() body: { token: string; platform?: string }) {
+    // Verify token without throwing error, extract userId
+    try {
+      /**eslint-disable-next-line */
+      const decoded = this.jwtService.verify<{ userId: string }>(body.token);
+      return this.authService.logout(decoded.userId, body?.platform);
+    } catch (error) {
+      this.logger.warn('Invalid token in logout-with-token:', error);
+      throw new BadRequestException('Token không hợp lệ');
+    }
   }
 
   @Get('verify-token')

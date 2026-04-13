@@ -1,10 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsBoolean,
-  IsUUID,
-  IsDateString,
-} from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
 
 export class CreateUserDevicesDto {
   @IsUUID()

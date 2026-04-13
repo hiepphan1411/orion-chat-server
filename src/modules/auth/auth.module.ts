@@ -7,11 +7,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Otp } from './entities/otp.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDevicesModule } from '../user-devices/user-devices.module';
+import { PresenceModule } from '../presence/presence.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Otp, User]),
     UserDevicesModule,
+    PresenceModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

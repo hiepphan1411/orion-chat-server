@@ -1,5 +1,11 @@
 /* eslint-disable */
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,6 +17,7 @@ import { User } from '../users/entities/user.entity';
 import { CompleteRegisterDto } from './dto/complete-register.dto';
 import { UserDevicesService } from '../user-devices/user-devices.service';
 import { CreateUserDevicesDto } from '../user-devices/dto/user-devices.dto';
+import { PresenceGateway } from '../presence/presence.gateway';
 
 type LoginDevicePayload = Partial<
   Pick<
@@ -44,6 +51,7 @@ export class AuthService {
 
     private jwtService: JwtService,
     private configService: ConfigService,
+    private presenceGateway: PresenceGateway,
   ) {
     this.esmsApiKey = this.configService.get('ESMS_API_KEY') || '';
     this.esmsSecretKey = this.configService.get('ESMS_SECRET_KEY') || '';
@@ -78,11 +86,15 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private generateJwtToken(phoneNumber: string, userId: string): string {
+  private generateJwtToken(
+    phoneNumber: string,
+    userId: string,
+    deviceType: string = 'web',
+  ): string {
     return this.jwtService.sign(
-      { phoneNumber, userId },
+      { phoneNumber, userId, deviceType },
       {
-        expiresIn: '24h', // ✅ Token valid for 24 hours
+        expiresIn: '24h', // Token valid for 24 hours
       },
     );
   }
@@ -291,14 +303,6 @@ export class AuthService {
 
   async completeRegister(data: CompleteRegisterDto) {
     try {
-      console.log('[AuthService.completeRegister] Received data:', data);
-      console.log('[AuthService.completeRegister] Field check:', {
-        phoneNumber: data.phoneNumber,
-        password: data.password,
-        fullName: data.fullName,
-        birthDate: data.birthDate,
-      });
-
       // Validate required fields
       if (
         !data.phoneNumber ||
@@ -373,6 +377,38 @@ export class AuthService {
     }
   }
 
+  private emitSessionConflict(
+    userId: string,
+    oldPlatform: string,
+    newPlatform: string,
+  ): void {
+    try {
+      if (!this.presenceGateway || !this.presenceGateway.server) {
+        this.logger.warn(
+          'Presence gateway not available for emitting session conflict',
+        );
+        return;
+      }
+
+      // Emit to ALL devices of same platform that was just replaced
+      // This ensures ALL old devices of same platform get notified, not just one
+      this.presenceGateway.server
+        .to(`user:${userId}:${oldPlatform}`)
+        .emit('session:conflict', {
+          message: `Tài khoản của bạn được đăng nhập từ ${newPlatform} khác. Phiên hiện tại sẽ bị đóng.`,
+          oldPlatform,
+          newPlatform,
+          timestamp: new Date().toISOString(),
+        });
+
+      this.logger.log(
+        `[Session Conflict] Notified ALL ${oldPlatform} devices of user ${userId} about login from ${newPlatform}`,
+      );
+    } catch (error) {
+      this.logger.error('Error emitting session conflict:', error);
+    }
+  }
+
   async login(
     phoneNumber: string,
     password: string,
@@ -384,11 +420,19 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại và mật khẩu là bắt buộc');
       }
 
+      this.logger.log(
+        `[Login Service] Full devicePayload: ${JSON.stringify(devicePayload)}`,
+      );
+
       const platform = (devicePayload?.deviceType || 'web').toLowerCase();
 
       this.logger.log(
         `Login attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
       );
+      this.logger.log(
+        `[Login] devicePayload.deviceType: ${devicePayload?.deviceType}`,
+      );
+      this.logger.log(`[Login] PLATFORM DECIDED: ${platform}`);
 
       // Find user by phone number
 
@@ -397,7 +441,7 @@ export class AuthService {
       });
 
       if (!user) {
-        this.logger.warn(`⚠ User not found: ${phoneNumber}`);
+        this.logger.warn(`User not found: ${phoneNumber}`);
         throw new BadRequestException('Số điện thoại hoặc mật khẩu sai');
       }
 
@@ -413,32 +457,58 @@ export class AuthService {
       this.logger.log(`Login successful for: ${phoneNumber}`);
 
       // Generate JWT token with both phoneNumber and userId (UUID)
-      const token = this.generateJwtToken(phoneNumber, user.userId);
+      const token = this.generateJwtToken(phoneNumber, user.userId, platform);
 
       // quản lý phiên đăng nhập
       const now = new Date();
 
-      if (platform === 'mobile') {
-        // Mobile: chỉ vô hiệu hóa phiên mobile cũ
+      // Check if there's an existing session and notify old device to logout
+      // Only emit if session token exists AND is different from new token
+      if (
+        platform === 'mobile' &&
+        user.mobileSessionToken &&
+        user.mobileSessionToken !== token
+      ) {
+        // Notify old mobile device - will logout automatically
+        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
+        // Add delay to ensure old socket receives event before token is overwritten
+        // Need 500ms for client to establish socket connection
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } else if (
+        platform === 'web' &&
+        user.webSessionToken &&
+        user.webSessionToken !== token
+      ) {
+        // Notify old web device - will logout automatically
+        this.emitSessionConflict(user.userId, 'web', 'web');
+        // Add delay to ensure old socket receives event before token is overwritten
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
 
+      // If allowed, proceed with login
+      if (platform === 'mobile') {
         user.mobileSessionToken = token;
         user.mobileSessionStartedAt = now;
         user.mobileLastActivityAt = Date.now();
+        this.logger.log(
+          `[Login] ✅ Saved token to mobileSessionToken (platform=mobile)`,
+        );
       } else if (platform === 'web') {
-        // Web: chỉ vô hiệu hóa phiên web cũ
-
         user.webSessionToken = token;
         user.webSessionStartedAt = now;
         user.webLastActivityAt = Date.now();
+        this.logger.log(
+          `[Login] ✅ Saved token to webSessionToken (platform=web)`,
+        );
       } else {
         // mặc định: coi như web để tương thích ngược
-
         user.webSessionToken = token;
         user.webSessionStartedAt = now;
         user.webLastActivityAt = Date.now();
-        // Giữ lại currentSessionToken cũ để tương thích ngược
-
         user.currentSessionToken = token;
+        this.logger.log(
+          `[Login] ⚠️ Platform unknown, defaulting to webSessionToken`,
+        );
       }
 
       user.lastLoginAt = now;
@@ -454,16 +524,6 @@ export class AuthService {
           }`,
         );
       }
-
-      console.log(`\n${'='.repeat(60)}`);
-      console.log(`LOGIN SUCCESSFUL`);
-      console.log(`${'='.repeat(60)}`);
-      console.log(`Phone: ${phoneNumber}`);
-      console.log(`Full Name: ${user.fullName}`);
-      console.log(`Platform: ${platform || 'web'}`);
-      console.log(`Token: ${token.substring(0, 50)}...`);
-      console.log(`Login Time: ${new Date().toISOString()}`);
-      console.log(`${'='.repeat(60)}\n`);
 
       // trả về dữ liệu người dùng với token JWT
       return {
@@ -498,14 +558,18 @@ export class AuthService {
     }
   }
 
-  async logout(phoneNumber: string, platform?: string) {
+  async logout(phoneNumberOrUserId: string, platform?: string) {
     try {
       this.logger.log(
-        `Logout attempt for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+        `Logout attempt for: ${phoneNumberOrUserId} (Platform: ${platform || 'unknown'})`,
       );
 
+      // Find user by phoneNumber or userId
       const user = await this.userRepo.findOne({
-        where: { phoneNumber },
+        where: [
+          { phoneNumber: phoneNumberOrUserId },
+          { userId: phoneNumberOrUserId },
+        ],
       });
 
       if (!user) {
@@ -517,10 +581,14 @@ export class AuthService {
         user.mobileSessionToken = null as unknown as string;
         user.mobileSessionStartedAt = null as unknown as Date;
         user.mobileLastActivityAt = null as unknown as number;
+        // Emit logout notification to mobile
+        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
       } else if (platform === 'web') {
         user.webSessionToken = null as unknown as string;
         user.webSessionStartedAt = null as unknown as Date;
         user.webLastActivityAt = null as unknown as number;
+        // Emit logout notification to web
+        this.emitSessionConflict(user.userId, 'web', 'web');
       } else {
         // Default: xóa tất cả session
         user.webSessionToken = null as unknown as string;
@@ -528,12 +596,15 @@ export class AuthService {
         user.webSessionStartedAt = null as unknown as Date;
         user.mobileSessionStartedAt = null as unknown as Date;
         user.currentSessionToken = null as unknown as string;
+        // Emit to both platforms
+        this.emitSessionConflict(user.userId, 'web', 'web');
+        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
       }
 
       await this.userRepo.save(user);
 
       this.logger.log(
-        `✓ Logout successful for: ${phoneNumber} (Platform: ${platform || 'unknown'})`,
+        `✓ Logout successful for: ${phoneNumberOrUserId} (Platform: ${platform || 'unknown'})`,
       );
 
       return {
@@ -548,9 +619,41 @@ export class AuthService {
       this.logger.error('Error during logout:', error);
       throw error instanceof BadRequestException
         ? error
-        : new BadRequestException(
-            error.message || 'Lỗi đăng xuất. Vui lòng thử lại.',
-          );
+        : new BadRequestException('Lỗi khi đăng xuất');
+    }
+  }
+
+  async checkSessionConflict(phoneNumber: string, platform: string) {
+    try {
+      const user = await this.userRepo.findOne({
+        where: { phoneNumber },
+      });
+
+      if (!user) {
+        throw new BadRequestException('Người dùng không tồn tại');
+      }
+
+      // Kiểm tra xem có session cũ cùng platform hay không
+      const hasConflict =
+        platform === 'web' ? !!user.webSessionToken : !!user.mobileSessionToken;
+
+      return {
+        success: true,
+        data: {
+          phoneNumber,
+          platform,
+          hasConflict, // true = có device khác cùng platform đã login
+          message: hasConflict
+            ? `Bạn đã đăng nhập ở ${platform === 'web' ? 'thiết bị web' : 'thiết bị mobile'} khác`
+            : 'Không có session conflict',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('Error checking session conflict:', error);
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException('Lỗi khi kiểm tra phiên đăng nhập');
     }
   }
 
@@ -680,7 +783,7 @@ export class AuthService {
       // xóa OTP đã sử dụng
       await this.otpRepo.delete({ id: otpRecord.id });
 
-      this.logger.log(`✓ Password reset successful for: ${data.phoneNumber}`);
+      this.logger.log(`Password reset successful for: ${data.phoneNumber}`);
 
       return {
         success: true,
