@@ -19,6 +19,7 @@ import * as jwt from 'jsonwebtoken';
 import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
 import { MessageType } from 'src/common/enums/message-type.enum';
+import { NotificationService } from '../notifications/notification.service';
 
 type ChatClientMessageType =
   | 'text'
@@ -66,6 +67,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly configService: ConfigService,
     @Inject(UsersService)
     private readonly usersService: UsersService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -338,6 +340,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         messageStatus: 'SENT',
         callData: data.callData || null,
       });
+
+      // Chi gui notification cho nguoi nhan trong direct chat.
+      if (data.receiverId && data.receiverId !== senderId) {
+        const contentPreview =
+          data.type === 'text'
+            ? data.content
+            : data.type === 'call'
+              ? 'Ban co mot lich su cuoc goi moi'
+              : `Da gui ${data.type}`;
+
+        await this.notificationService.createAndEmit({
+          userId: data.receiverId,
+          type: data.type === 'call' ? 'call' : 'message',
+          title: senderName || 'Tin nhan moi',
+          body: contentPreview,
+          link: '/chat',
+          metadata: {
+            conversationId: data.conversationId,
+            senderId,
+            messageId: String(message._id),
+            messageType: data.type,
+          },
+        });
+      }
 
       // ACK back to sender
       return {

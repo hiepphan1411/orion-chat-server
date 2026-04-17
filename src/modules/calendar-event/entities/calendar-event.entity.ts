@@ -71,6 +71,9 @@ export class CalendarEvent {
   @Column({ default: false })
   isAllDay: boolean;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  reminderSentAt: Date | null;
+
   @OneToMany(
     () => CalendarEventParticipant,
     (participant) => participant.event,
