@@ -6,6 +6,7 @@ import { User } from '../users/entities/user.entity';
 import { GroupInviteController } from './group-invite.controller';
 import { GroupInviteService } from './group-invite.service';
 import { GroupInvite } from './entities/group-invite.entity';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { GroupInvite } from './entities/group-invite.entity';
       GroupMember,
       User,
     ]),
+    NotificationModule,
   ],
   controllers: [GroupInviteController],
   providers: [GroupInviteService],

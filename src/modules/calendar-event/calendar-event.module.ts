@@ -8,6 +8,7 @@ import { CalendarEventController } from './calendar-event.controller';
 import { CalendarEventService } from './calendar-event.service';
 import { CalendarEvent } from './entities/calendar-event.entity';
 import { CalendarEventParticipant } from './entities/calendar-event-participant.entity';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { CalendarEventParticipant } from './entities/calendar-event-participant.
       GroupMember,
       GroupConversation,
     ]),
+    NotificationModule,
   ],
   controllers: [CalendarEventController],
   providers: [CalendarEventService],
