@@ -18,16 +18,7 @@ import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
-import { MessageType } from 'src/common/enums/message-type.enum';
 import { NotificationService } from '../notifications/notification.service';
-
-type ChatClientMessageType =
-  | 'text'
-  | 'image'
-  | 'file'
-  | 'audio'
-  | 'video'
-  | 'call';
 
 const onlineUsers = new Map<string, string>();
 
@@ -230,7 +221,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(
         `[ChatGateway] Joining conversation: ${data.conversationId}`,
       );
-      client.join(`conversation:${data.conversationId}`);
+      await client.join(`conversation:${data.conversationId}`);
 
       return {
         ok: true,
@@ -260,7 +251,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clientMessageId: string;
       conversationId: string;
       receiverId: string;
-      type: 'text' | 'image' | 'file' | 'audio';
+      type: 'text' | 'image' | 'file' | 'audio' | 'call';
       content: string;
       mediaUrl?: string;
       fileName?: string;
@@ -304,7 +295,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         messageStatus: 'SENT',
       });
 
-      this.logger.log(`[ChatGateway] Message created: ${message._id}`);
+      this.logger.log(`[ChatGateway] Message created: ${String(message._id)}`);
 
       // Fetch sender info to include in message emit
       let senderName = senderId;
@@ -389,7 +380,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('chat:typing')
-  async handleTyping(
+  handleTyping(
     @ConnectedSocket() client: Socket,
     @MessageBody()
     data: {
