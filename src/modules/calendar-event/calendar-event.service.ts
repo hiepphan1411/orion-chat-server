@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -21,7 +23,7 @@ import {
   CalendarEventParticipant,
   CalendarParticipantType,
 } from './entities/calendar-event-participant.entity';
-import { In, Repository } from 'typeorm';
+import { Brackets, In, IsNull, Repository } from 'typeorm';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
 import { CalendarParticipantDto } from './dto/calendar-participant.dto';
 import {
@@ -29,9 +31,12 @@ import {
   QueryCalendarEventDto,
 } from './dto/query-calendar-event.dto';
 import { UpdateCalendarEventDto } from './dto/update-calendar-event.dto';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
-export class CalendarEventService {
+export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
+  private reminderTimer: NodeJS.Timeout | null = null;
+
   constructor(
     @InjectRepository(CalendarEvent)
     private readonly calendarEventRepo: Repository<CalendarEvent>,
@@ -45,11 +50,26 @@ export class CalendarEventService {
     private readonly groupMemberRepo: Repository<GroupMember>,
     @InjectRepository(GroupConversation)
     private readonly groupConversationRepo: Repository<GroupConversation>,
+    private readonly notificationService: NotificationService,
   ) {}
+
+  onModuleInit() {
+    this.reminderTimer = setInterval(() => {
+      this.sendDueReminders().catch(() => undefined);
+    }, 30000);
+  }
+
+  onModuleDestroy() {
+    if (this.reminderTimer) {
+      clearInterval(this.reminderTimer);
+      this.reminderTimer = null;
+    }
+  }
 
   async findAllForUser(userId: string, query: QueryCalendarEventDto) {
     const { rangeStart, rangeEnd } = this.resolveRange(query);
     const keyword = query.q?.trim();
+    const joinedGroupIds = await this.getJoinedGroupIds(userId);
 
     const qb = this.calendarEventRepo
       .createQueryBuilder('event')
@@ -57,7 +77,22 @@ export class CalendarEventService {
       .leftJoinAndSelect('event.participants', 'participant')
       .leftJoinAndSelect('participant.user', 'participantUser')
       .leftJoinAndSelect('participant.group', 'participantGroup')
-      .where('owner.userId = :userId', { userId })
+      .where(
+        new Brackets((whereQb) => {
+          whereQb
+            .where('owner.userId = :userId', { userId })
+            .orWhere('participantUser.userId = :userId', { userId });
+
+          if (joinedGroupIds.length) {
+            whereQb.orWhere(
+              'participantGroup.conversationId IN (:...groupIds)',
+              {
+                groupIds: joinedGroupIds,
+              },
+            );
+          }
+        }),
+      )
       .andWhere('event.startTime < :rangeEnd', { rangeEnd })
       .andWhere('event.endTime >= :rangeStart', { rangeStart })
       .orderBy('event.startTime', 'ASC');
@@ -150,10 +185,12 @@ export class CalendarEventService {
       recurrence: dto.recurrence || CalendarEventRecurrence.NONE,
       notificationMinutes: dto.notificationMinutes ?? 30,
       isAllDay: dto.isAllDay ?? false,
+      reminderSentAt: null,
       participants,
     });
 
     const saved = await this.calendarEventRepo.save(event);
+    await this.notifyEventInvitees(saved, new Set<string>());
     return this.toResponse(saved);
   }
 
@@ -176,6 +213,8 @@ export class CalendarEventService {
       throw new ForbiddenException('You can only edit your own calendar event');
     }
 
+    const previousInvitees = await this.resolveParticipantRecipientIds(event);
+
     const nextStart = dto.startTime ? new Date(dto.startTime) : event.startTime;
     const nextEnd = dto.endTime ? new Date(dto.endTime) : event.endTime;
     this.validateEventTime(nextStart, nextEnd);
@@ -191,6 +230,7 @@ export class CalendarEventService {
     event.notificationMinutes =
       dto.notificationMinutes ?? event.notificationMinutes;
     event.isAllDay = dto.isAllDay ?? event.isAllDay;
+    event.reminderSentAt = null;
 
     if (dto.participants) {
       event.participants = await this.resolveParticipants(
@@ -200,6 +240,7 @@ export class CalendarEventService {
     }
 
     const saved = await this.calendarEventRepo.save(event);
+    await this.notifyEventInvitees(saved, new Set(previousInvitees));
     return this.toResponse(saved);
   }
 
@@ -409,6 +450,7 @@ export class CalendarEventService {
       recurrence: event.recurrence,
       notificationMinutes: event.notificationMinutes,
       isAllDay: event.isAllDay,
+      reminderSentAt: event.reminderSentAt,
       participants: (event.participants || []).map((participant) => ({
         id: participant.participantId,
         type: participant.type,
@@ -420,5 +462,141 @@ export class CalendarEventService {
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     };
+  }
+
+  private async getJoinedGroupIds(userId: string): Promise<string[]> {
+    const rows = await this.groupMemberRepo.find({
+      where: { user: { userId } },
+      relations: ['group'],
+      take: 200,
+    });
+
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => row.group?.conversationId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+  }
+
+  private async resolveParticipantRecipientIds(event: CalendarEvent) {
+    const recipientIds = new Set<string>();
+
+    for (const participant of event.participants || []) {
+      if (
+        participant.type === CalendarParticipantType.FRIEND &&
+        participant.user?.userId
+      ) {
+        recipientIds.add(participant.user.userId);
+      }
+    }
+
+    const groupIds = Array.from(
+      new Set(
+        (event.participants || [])
+          .filter(
+            (participant) => participant.type === CalendarParticipantType.GROUP,
+          )
+          .map((participant) => participant.group?.conversationId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+
+    if (groupIds.length) {
+      const memberships = await this.groupMemberRepo.find({
+        where: { group: { conversationId: In(groupIds) } },
+        relations: ['user'],
+      });
+
+      for (const membership of memberships) {
+        if (membership.user?.userId) {
+          recipientIds.add(membership.user.userId);
+        }
+      }
+    }
+
+    recipientIds.delete(event.owner?.userId);
+    return Array.from(recipientIds);
+  }
+
+  private async notifyEventInvitees(
+    event: CalendarEvent,
+    existingRecipientIds: Set<string>,
+  ) {
+    const recipientIds = await this.resolveParticipantRecipientIds(event);
+    const newRecipients = recipientIds.filter(
+      (id) => !existingRecipientIds.has(id),
+    );
+
+    for (const userId of newRecipients) {
+      await this.notificationService.createAndEmit({
+        userId,
+        type: 'event_invite',
+        title: 'You are invited to an event',
+        body: `${event.owner.fullName} has invited you to the event "${event.title}"`,
+        link: '/calendar',
+        metadata: {
+          eventId: event.eventId,
+          startTime: event.startTime,
+          invitedBy: event.owner.userId,
+        },
+      });
+    }
+  }
+
+  private async sendDueReminders() {
+    const now = new Date();
+    const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const candidates = await this.calendarEventRepo.find({
+      where: {
+        reminderSentAt: IsNull(),
+      },
+      relations: [
+        'owner',
+        'participants',
+        'participants.user',
+        'participants.group',
+      ],
+      take: 200,
+      order: { startTime: 'ASC' },
+    });
+
+    const dueEvents = candidates.filter((event) => {
+      if (!event.owner?.userId) return false;
+      if (event.startTime <= now || event.startTime > nextDay) return false;
+
+      const reminderTime = new Date(
+        event.startTime.getTime() - event.notificationMinutes * 60 * 1000,
+      );
+
+      return reminderTime <= now;
+    });
+
+    for (const event of dueEvents) {
+      const recipientIds = new Set<string>([event.owner.userId]);
+      const participantRecipientIds =
+        await this.resolveParticipantRecipientIds(event);
+      participantRecipientIds.forEach((id) => recipientIds.add(id));
+
+      for (const recipientId of recipientIds) {
+        await this.notificationService.createAndEmit({
+          userId: recipientId,
+          type: 'event_reminder',
+          title: 'Event reminder',
+          body: `${event.title} will start at ${event.startTime.toLocaleTimeString()}`,
+          link: '/calendar',
+          metadata: {
+            eventId: event.eventId,
+            startTime: event.startTime,
+            notificationMinutes: event.notificationMinutes,
+          },
+        });
+      }
+
+      event.reminderSentAt = new Date();
+      await this.calendarEventRepo.save(event);
+    }
   }
 }
