@@ -101,6 +101,22 @@ export class S3UploadService {
     };
   }
 
+  async uploadFilesConcurrently(
+    files: Express.Multer.File[],
+    keyPrefix = 'uploads',
+  ): Promise<Array<UploadResult & { index: number; originalname: string }>> {
+    const uploads = files.map(async (file, index) => {
+      const uploaded = await this.uploadFile(file, keyPrefix);
+      return {
+        ...uploaded,
+        index,
+        originalname: file.originalname,
+      };
+    });
+
+    return Promise.all(uploads);
+  }
+
   async uploadImageToS3(
     input: S3ImageUploadInput,
   ): Promise<S3ImageUploadResult> {
