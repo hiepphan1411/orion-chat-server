@@ -33,6 +33,9 @@ export class GroupConversation {
   @Column({ type: 'boolean', default: false })
   isDissolved!: boolean;
 
+  @Column({ type: 'boolean', default: true })
+  joinRequireApproval!: boolean;
+
   @Column({ type: 'timestamp', nullable: true })
   dissolvedAt!: Date | null;
 

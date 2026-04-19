@@ -14,6 +14,8 @@ import {
 import { User } from '../users/entities/user.entity';
 import { NotificationService } from '../notifications/notification.service';
 
+const GROUP_MEMBER_LIMIT = 10;
+
 @Injectable()
 export class GroupInviteService {
   constructor(
@@ -67,6 +69,16 @@ export class GroupInviteService {
 
     if (inviteeMembership) {
       throw new BadRequestException('Invitee is already a group member');
+    }
+
+    const currentMemberCount = await this.memberRepo.count({
+      where: { group: { conversationId: groupId } },
+    });
+
+    if (currentMemberCount >= GROUP_MEMBER_LIMIT) {
+      throw new BadRequestException(
+        `Group member limit reached (${GROUP_MEMBER_LIMIT})`,
+      );
     }
 
     const existing = await this.inviteRepo.findOne({
@@ -169,6 +181,16 @@ export class GroupInviteService {
         user: { userId: inviteeId },
       },
     });
+
+    const currentMemberCount = await this.memberRepo.count({
+      where: { group: { conversationId: invite.group.conversationId } },
+    });
+
+    if (!existingMember && currentMemberCount >= GROUP_MEMBER_LIMIT) {
+      throw new BadRequestException(
+        `Group member limit reached (${GROUP_MEMBER_LIMIT})`,
+      );
+    }
 
     if (!existingMember) {
       const user = await this.userRepo.findOne({

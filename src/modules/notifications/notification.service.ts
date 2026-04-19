@@ -12,7 +12,13 @@ export type NotificationType =
   | 'group_invite'
   | 'event_invite'
   | 'event_reminder'
-  | 'system';
+  | 'system'
+  | 'group_join_approved'
+  | 'group_join_rejected'
+  | 'group_promoted'
+  | 'group_removed'
+  | 'group_dissolved'
+  | 'group_join_request';
 
 export interface CreateNotificationInput {
   userId: string;

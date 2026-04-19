@@ -260,6 +260,51 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .emit('group:dissolved', payload);
   }
 
+  emitGroupJoinApprovalSettingUpdated(payload: {
+    groupId: string;
+    joinRequireApproval: boolean;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_approval_setting_updated', payload);
+  }
+
+  emitGroupJoinRequestCreated(payload: {
+    groupId: string;
+    requestId: string;
+    requesterId: string;
+    createdAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_request_created', payload);
+  }
+
+  emitGroupJoinRequestUpdated(payload: {
+    groupId: string;
+    requestId: string;
+    status: 'approved' | 'rejected';
+    actedBy: string;
+    actedAt: string;
+    requesterId: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_request_updated', payload);
+  }
+
+  emitGroupMemberJoined(payload: {
+    groupId: string;
+    userId: string;
+    joinedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:member_joined', payload);
+  }
+
   emitConversationHiddenUpdated(payload: {
     conversationId: string;
     userId: string;
@@ -331,6 +376,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           callData: payload.callData || null,
         },
       });
+  }
+
+  emitMessagePinned(payload: {
+    conversationId: string;
+    messageId: string;
+    pinnedBy: string;
+    pinnedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_pinned', payload);
+  }
+
+  emitMessageUnpinned(payload: {
+    conversationId: string;
+    messageId: string;
+    unpinnedBy: string;
+    unpinnedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_unpinned', payload);
   }
 
   // Các @SubscribeMessage còn lại **giữ nguyên hoàn toàn** như code cũ của bạn
@@ -456,6 +523,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         senderId,
         data.conversationId,
       );
+
+      if (data.replyToMessageId) {
+        const replyMessage = await this.messageModel
+          .findOne({
+            _id: data.replyToMessageId,
+            conversationId: data.conversationId,
+            isDeleted: false,
+          })
+          .select('_id')
+          .lean<{ _id: unknown } | null>()
+          .exec();
+
+        if (!replyMessage) {
+          return this.buildErrorAck(
+            data.requestId,
+            'REPLY_MESSAGE_NOT_FOUND',
+            'Reply target message not found in this conversation',
+            false,
+          );
+        }
+      }
 
       // Create message in database
       const message = await this.messageModel.create({
