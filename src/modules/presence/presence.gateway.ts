@@ -51,6 +51,10 @@ export class PresenceGateway
       // Join platform-specific room so only same platform receives conflict events
       void client.join(`user:${userId}:${platform}`);
 
+      console.log(
+        `[handleConnection] Socket ${client.id} joined rooms: user:${userId}, user:${userId}:${platform}`,
+      );
+
       this.logger.log(
         `Presence connected: ${userId} (${client.id}) [${platform}]. Devices: ${onlineUsers.get(userId)!.size}, Total online: ${onlineUsers.size}`,
       );
