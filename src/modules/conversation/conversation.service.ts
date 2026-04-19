@@ -12,11 +12,20 @@ import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { Conversation, ConversationType } from './entities/conversation.schema';
-import { ConversationParticipant } from './entities/conversation-participant.entity';
+import {
+  ConversationParticipant,
+  ParticipantRole,
+} from './entities/conversation-participant.entity';
+import { GroupConversation } from './entities/group-conversation.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
 import { User } from '../users/entities/user.entity';
+import {
+  GroupMember,
+  GroupMemberRole,
+} from '../group-member/entities/group-member.entity';
 
 type MessageDetail = {
+  _id?: string;
   content?: string;
   senderBy?: string;
   senderName?: string;
@@ -28,6 +37,9 @@ type MessageDetail = {
   isPinned?: boolean;
   isDeleted?: boolean;
   isRevoked?: boolean;
+  deletedByAdmin?: boolean;
+  adminDeletedBy?: string;
+  adminDeletedAt?: Date | string;
   revokedBy?: string;
   revokedAt?: Date | string;
   replyToMessageId?: string | null;
@@ -37,6 +49,7 @@ type MessageDetail = {
   mediaUrl?: string;
   fileName?: string;
   fileSize?: number;
+  mimeType?: string;
   callData?: {
     callType?: 'audio' | 'video';
     callStatus?: 'completed' | 'missed' | 'declined';
@@ -53,7 +66,28 @@ type LastMessageAggregateRow = {
 
 type ConversationMessagesResult = {
   conversationId: string;
-  items: MessageDetail[];
+  items: Array<{
+    id: string;
+    conversationId: string;
+    senderId: string;
+    content: string;
+    attachments: Array<{
+      mediaUrl?: string;
+      fileName?: string;
+      fileSize?: number;
+      mimeType?: string;
+    }>;
+    createdAt: Date | string;
+    recalled: boolean;
+    deletedByAdmin: boolean;
+    replyToMessageId: string | null;
+    replyToMessagePreview?: {
+      senderName: string;
+      snippet: string;
+    };
+    canRecall: boolean;
+    canAdminDelete: boolean;
+  }>;
   nextCursor: string | null;
 };
 
@@ -90,6 +124,7 @@ type ConversationView = {
   participants: Array<{
     userId: string;
     fullName: string | null;
+    nickname?: string | null;
     avatarUrl: string | null;
     role: any;
     joinedAt: Date;
@@ -116,6 +151,8 @@ export class ConversationService {
     private readonly conversationRepo: Repository<Conversation>,
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
+    @InjectRepository(GroupMember)
+    private readonly groupMemberRepo: Repository<GroupMember>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectModel(Message.name)
@@ -128,6 +165,8 @@ export class ConversationService {
       relations: [
         'conversation',
         'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
@@ -204,9 +243,9 @@ export class ConversationService {
       );
     }
 
-      if (currentUserId === recipientId) {
-          throw new BadRequestException('Cannot create conversation with yourself');
-      }
+    if (currentUserId === recipientId) {
+      throw new BadRequestException('Cannot create conversation with yourself');
+    }
 
     // Validate UUIDs
     this.validateUUID(currentUserId, 'currentUserId');
@@ -281,6 +320,9 @@ export class ConversationService {
       },
       relations: [
         'conversation',
+        'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
@@ -297,13 +339,118 @@ export class ConversationService {
     return this.toConversationView(membership, null, blockStatus);
   }
 
+  async createGroupConversation(payload: {
+    creatorId: string;
+    groupName: string;
+    memberIds?: string[];
+    memberNicknames?: Array<{ userId: string; nickname?: string }>;
+  }): Promise<ConversationView> {
+    const creatorId = String(payload.creatorId || '').trim();
+    const groupName = String(payload.groupName || '').trim();
+
+    if (!creatorId) {
+      throw new BadRequestException('creatorId is required');
+    }
+
+    if (!groupName || groupName.length < 2) {
+      throw new BadRequestException('groupName must be at least 2 characters');
+    }
+
+    this.validateUUID(creatorId, 'creatorId');
+
+    const rawMemberIds = Array.isArray(payload.memberIds)
+      ? payload.memberIds
+      : [];
+    const uniqueMemberIds = [...new Set(rawMemberIds.filter(Boolean))];
+    const normalizedMemberIds = uniqueMemberIds.filter(
+      (id) => id !== creatorId,
+    );
+    const allParticipantIds = [creatorId, ...normalizedMemberIds];
+
+    if (normalizedMemberIds.length === 0) {
+      throw new BadRequestException(
+        'Group must contain at least one member besides creator',
+      );
+    }
+
+    for (const userId of allParticipantIds) {
+      this.validateUUID(userId, 'memberId');
+    }
+
+    const users = await this.userRepo.find({
+      where: { userId: In(allParticipantIds) },
+    });
+
+    if (users.length !== allParticipantIds.length) {
+      throw new NotFoundException('One or more members not found');
+    }
+
+    const nicknameMap = new Map<string, string>();
+    for (const item of payload.memberNicknames || []) {
+      const userId = String(item.userId || '').trim();
+      const nickname = String(item.nickname || '').trim();
+
+      if (!userId || !nickname) continue;
+      if (!allParticipantIds.includes(userId)) continue;
+
+      nicknameMap.set(userId, nickname.slice(0, 50));
+    }
+
+    const createdConversationId =
+      await this.conversationRepo.manager.transaction(async (manager) => {
+        const conversation = manager.create(Conversation, {
+          type: ConversationType.GROUP,
+        });
+        const savedConversation = await manager.save(
+          Conversation,
+          conversation,
+        );
+
+        const groupConversation = manager.create(GroupConversation, {
+          conversationId: savedConversation.conversationId,
+          groupName,
+          ownerId: creatorId,
+        });
+        await manager.save(GroupConversation, groupConversation);
+
+        const participants = allParticipantIds.map((userId) =>
+          manager.create(ConversationParticipant, {
+            conversationId: savedConversation.conversationId,
+            userId,
+            role:
+              userId === creatorId
+                ? ParticipantRole.ADMIN
+                : ParticipantRole.MEMBER,
+          }),
+        );
+        await manager.save(ConversationParticipant, participants);
+
+        const groupMembers = allParticipantIds.map((userId) =>
+          manager.create(GroupMember, {
+            group: { conversationId: savedConversation.conversationId },
+            user: { userId },
+            role:
+              userId === creatorId
+                ? GroupMemberRole.OWNER
+                : GroupMemberRole.MEMBER,
+            nickname: nicknameMap.get(userId) || null,
+          }),
+        );
+        await manager.save(GroupMember, groupMembers);
+
+        return savedConversation.conversationId;
+      });
+
+    return this.findDetailById(createdConversationId, creatorId);
+  }
+
   async getMessagesByConversation(
     conversationId: string,
     userId: string,
     cursor?: string,
     limit = 30,
   ): Promise<ConversationMessagesResult> {
-    await this.requireMembership(conversationId, userId);
+    const membership = await this.requireMembership(conversationId, userId);
 
     const pageSize = Math.min(Math.max(limit, 1), 100);
     const items = await this.fetchConversationMessages(
@@ -313,6 +460,103 @@ export class ConversationService {
       userId,
     );
 
+    const adminRoles = [
+      GroupMemberRole.OWNER,
+      GroupMemberRole.ADMIN,
+      GroupMemberRole.CO_ADMIN,
+    ];
+
+    let canManageAsAdmin = false;
+    if (membership.conversation.type === ConversationType.GROUP) {
+      const myGroupMember = await this.groupMemberRepo.findOne({
+        where: {
+          group: { conversationId },
+          user: { userId },
+        },
+      });
+
+      canManageAsAdmin =
+        !!myGroupMember && adminRoles.includes(myGroupMember.role);
+    }
+
+    const replyToIds = [
+      ...new Set(items.map((m) => m.replyToMessageId).filter(Boolean)),
+    ] as string[];
+
+    const replyPreviewMap = new Map<
+      string,
+      { senderName: string; snippet: string }
+    >();
+
+    if (replyToIds.length > 0) {
+      const replyMessages = await this.messageModel
+        .find({ _id: { $in: replyToIds } })
+        .lean<
+          Array<{
+            _id: unknown;
+            senderBy: string;
+            content?: string;
+          }>
+        >();
+
+      const senderIds = [...new Set(replyMessages.map((m) => m.senderBy))];
+      const senderUsers = await this.userRepo.find({
+        where: { userId: In(senderIds) },
+      });
+      const senderMap = new Map(senderUsers.map((u) => [u.userId, u.fullName]));
+
+      for (const msg of replyMessages) {
+        const snippet = String(msg.content || '').slice(0, 100);
+        replyPreviewMap.set(String(msg._id), {
+          senderName: senderMap.get(msg.senderBy) || 'Unknown',
+          snippet,
+        });
+      }
+    }
+
+    const nowMs = Date.now();
+    const windowMs = 24 * 60 * 60 * 1000;
+
+    const mappedItems = items.map((item) => {
+      const createdAtDate = this.toDate(item.createdAt) || new Date(0);
+      const within24Hours = nowMs - createdAtDate.getTime() <= windowMs;
+      const senderId = String(item.senderBy || '');
+      const isOwnMessage = senderId === userId;
+      const recalled = !!item.isRevoked;
+      const deletedByAdmin = !!item.deletedByAdmin;
+
+      return {
+        id: String(item._id || ''),
+        conversationId,
+        senderId,
+        content: String(item.content || ''),
+        attachments: item.mediaUrl
+          ? [
+              {
+                mediaUrl: item.mediaUrl,
+                fileName: item.fileName,
+                fileSize: item.fileSize,
+                mimeType: item.mimeType,
+              },
+            ]
+          : [],
+        createdAt: createdAtDate,
+        recalled,
+        deletedByAdmin,
+        replyToMessageId: item.replyToMessageId || null,
+        replyToMessagePreview: item.replyToMessageId
+          ? replyPreviewMap.get(item.replyToMessageId) || undefined
+          : undefined,
+        canRecall: isOwnMessage && within24Hours && !recalled && !deletedByAdmin,
+        canAdminDelete:
+          canManageAsAdmin &&
+          !isOwnMessage &&
+          within24Hours &&
+          !recalled &&
+          !deletedByAdmin,
+      };
+    });
+
     const lastItem = items[items.length - 1];
     const nextCursor =
       items.length === pageSize && this.toDate(lastItem?.createdAt)
@@ -321,7 +565,7 @@ export class ConversationService {
 
     return {
       conversationId,
-      items,
+      items: mappedItems,
       nextCursor,
     };
   }
@@ -404,12 +648,18 @@ export class ConversationService {
       relations: [
         'conversation',
         'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
     });
 
     if (membership) {
+      if (membership.conversation.groupInfo?.isDissolved) {
+        throw new ForbiddenException('GROUP_DISSOLVED');
+      }
+
       return membership;
     }
 
@@ -644,6 +894,7 @@ export class ConversationService {
   private normalizeMessage(message: MessageDetail): MessageDetail {
     return {
       ...message,
+      _id: message._id ? String(message._id) : undefined,
       createdAt: this.toDate(message.createdAt) || message.createdAt,
       updatedAt: this.toDate(message.updatedAt) || message.updatedAt,
       seenBy: Array.isArray(message.seenBy)
@@ -706,6 +957,15 @@ export class ConversationService {
     },
   ) {
     const c = membership.conversation;
+    const groupNicknameMap = new Map<string, string | null>();
+
+    if (Array.isArray(c.groupInfo?.members)) {
+      for (const groupMember of c.groupInfo.members) {
+        const memberUserId = groupMember?.user?.userId;
+        if (!memberUserId) continue;
+        groupNicknameMap.set(memberUserId, groupMember.nickname || null);
+      }
+    }
 
     return {
       conversationId: c.conversationId,
@@ -762,6 +1022,7 @@ export class ConversationService {
       participants: c.participants.map((p) => ({
         userId: p.userId,
         fullName: p.user?.fullName ?? null,
+        nickname: groupNicknameMap.get(p.userId) ?? null,
         avatarUrl: p.user?.avatarUrl ?? null,
         role: p.role,
         joinedAt: p.joinedAt,
@@ -832,6 +1093,28 @@ export class ConversationService {
       success: true,
       conversationId,
       message: 'Conversation hidden successfully',
+    };
+  }
+
+  async setConversationHidden(
+    conversationId: string,
+    userId: string,
+    hidden: boolean,
+  ) {
+    await this.requireMembership(conversationId, userId);
+
+    await this.participantRepo.update(
+      { conversationId, userId },
+      {
+        isHidden: hidden,
+        hidePasswordHash: null,
+      },
+    );
+
+    return {
+      conversationId,
+      hidden,
+      updatedAt: new Date().toISOString(),
     };
   }
 

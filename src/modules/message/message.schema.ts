@@ -19,6 +19,18 @@ export class Message {
   @Prop()
   fileSize: number;
 
+  @Prop()
+  mimeType?: string;
+
+  @Prop()
+  fileExtension?: string;
+
+  @Prop()
+  fileCategory?: string;
+
+  @Prop()
+  fileIcon?: string;
+
   @Prop({ default: false })
   isPinned: boolean;
 
@@ -30,6 +42,15 @@ export class Message {
 
   @Prop({ default: false })
   isRevoked: boolean;
+
+  @Prop({ default: false })
+  deletedByAdmin: boolean;
+
+  @Prop({ default: null })
+  adminDeletedBy?: string;
+
+  @Prop({ default: null })
+  adminDeletedAt?: Date;
 
   @Prop({ default: null })
   revokedBy?: string;

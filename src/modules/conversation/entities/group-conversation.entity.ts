@@ -30,6 +30,15 @@ export class GroupConversation {
   @Column('uuid')
   ownerId!: string;
 
+  @Column({ type: 'boolean', default: false })
+  isDissolved!: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  dissolvedAt!: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  dissolvedBy!: string | null;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: 'ownerId' })
   owner!: User;

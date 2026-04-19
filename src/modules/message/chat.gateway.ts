@@ -10,7 +10,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, ValidationPipe } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
@@ -28,6 +28,12 @@ type ChatClientMessageType =
   | 'audio'
   | 'video'
   | 'call';
+import {
+  JoinConversationSocketDto,
+  SendMessageSocketDto,
+  TypingSocketDto,
+} from './dto/chat-socket.dto';
+import { ChatMembershipService } from './services/chat-membership.service';
 
 const onlineUsers = new Map<string, string>();
 
@@ -61,6 +67,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
+  private readonly validationPipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: false,
+  });
 
   constructor(
     @InjectModel(Message.name)
@@ -69,50 +80,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Inject(UsersService)
     private readonly usersService: UsersService,
     private readonly notificationService: NotificationService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   handleConnection(client: Socket) {
-    const token =
-      (client.handshake.auth?.token as string) ||
-      (client.handshake.query.token as string) ||
-      (client.handshake.auth?.userId as string) ||
-      (client.handshake.query.userId as string);
-
-    if (!token) {
-      this.logger.warn('No token provided in WebSocket connection');
-      client.disconnect(true);
-      return;
-    }
-
-    let userId: string;
-
-    if (token.includes('.')) {
-      try {
-        const secret =
-          this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
-        const decoded = jwt.verify(token, secret) as any;
-        userId = decoded.sub || decoded.userId || decoded.phoneNumber;
-
-        if (!userId) {
-          this.logger.warn('No userId found in JWT token');
-          client.disconnect(true);
-          return;
-        }
-      } catch (error) {
-        this.logger.warn(`Invalid JWT token: ${error}`);
-        client.disconnect(true);
-        return;
-      }
-    } else {
-      userId = token;
-    }
+    const userId = this.extractUserId(client);
 
     if (!userId) {
+      this.logger.warn('No userId found in WebSocket connection');
       client.disconnect(true);
       return;
     }
 
     onlineUsers.set(userId, client.id);
+    client.join(`user:${userId}`);
     this.logger.log(`User ${userId} connected: ${client.id}`);
 
     client.broadcast.emit('presence:user_online', {
@@ -207,6 +188,106 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  emitMessageAdminDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+    deletedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_admin_deleted', {
+        ...payload,
+        deletedByAdmin: true,
+      });
+  }
+
+  emitGroupAdminTransferred(payload: {
+    groupId: string;
+    oldAdminUserId: string;
+    newAdminUserId: string;
+    transferredAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:admin_transferred', payload);
+  }
+
+  emitGroupMemberLeft(payload: {
+    groupId: string;
+    userId: string;
+    leftAt: string;
+    groupDeleted: boolean;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:member_left', payload);
+  }
+
+  emitGroupMembersAdded(payload: {
+    groupId: string;
+    addedBy: string;
+    userIds: string[];
+    addedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:members_added', payload);
+  }
+
+  emitGroupAutoDeleteUpdated(payload: {
+    groupId: string;
+    autoDeleteDuration: number;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:auto_delete_updated', payload);
+  }
+
+  emitGroupDissolved(payload: {
+    groupId: string;
+    dissolvedBy: string;
+    dissolvedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:dissolved', payload);
+  }
+
+  emitConversationHiddenUpdated(payload: {
+    conversationId: string;
+    userId: string;
+    hidden: boolean;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`user:${payload.userId}`)
+      .emit('conversation:hidden_updated', {
+        conversationId: payload.conversationId,
+        userId: payload.userId,
+        hidden: payload.hidden,
+        updatedAt: payload.updatedAt,
+      });
+  }
+
+  emitConversationHistoryCleared(payload: {
+    conversationId: string;
+    userId: string;
+    deletedMessagesCount: number;
+    clearedAt: string;
+  }) {
+    this.server
+      .to(`user:${payload.userId}`)
+      .emit('conversation:history_cleared', {
+        conversationId: payload.conversationId,
+        userId: payload.userId,
+        deletedMessagesCount: payload.deletedMessagesCount,
+        clearedAt: payload.clearedAt,
+      });
+  }
+
   emitNewMessage(payload: {
     conversationId: string;
     messageId: string;
@@ -249,84 +330,128 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // Các @SubscribeMessage còn lại **giữ nguyên hoàn toàn** như code cũ của bạn
-  // (handleJoinConversation, handleSendMessage, handleTyping, handleFetchMessages, ...)
   @SubscribeMessage('chat:join_conversation')
-  handleJoinConversation(
+  async handleJoinConversation(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { requestId: string; conversationId: string },
+    @MessageBody() rawData: JoinConversationSocketDto,
   ) {
+    const requestId = String(rawData?.requestId || '');
+
     try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: JoinConversationSocketDto,
+      })) as JoinConversationSocketDto;
+
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
       this.logger.log(
         `[ChatGateway] Joining conversation: ${data.conversationId}`,
       );
       client.join(`conversation:${data.conversationId}`);
 
-      return {
-        ok: true,
-        requestId: data.requestId,
-        data: { conversationId: data.conversationId },
-      };
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+      });
     } catch (error) {
       this.logger.error('Error joining conversation:', error);
-      return {
-        ok: false,
-        requestId: data.requestId,
-        error: {
-          code: 'JOIN_FAILED',
-          message: error instanceof Error ? error.message : 'Join failed',
-          retriable: true,
-        },
-      };
+      return this.buildErrorAck(
+        requestId,
+        'JOIN_FAILED',
+        error instanceof Error ? error.message : 'Join failed',
+        true,
+      );
+    }
+  }
+
+  @SubscribeMessage('chat:leave_conversation')
+  async handleLeaveConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: JoinConversationSocketDto,
+  ) {
+    const requestId = String(rawData?.requestId || '');
+
+    try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: JoinConversationSocketDto,
+      })) as JoinConversationSocketDto;
+
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
+      client.leave(`conversation:${data.conversationId}`);
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+      });
+    } catch (error) {
+      this.logger.error('Error leaving conversation:', error);
+      return this.buildErrorAck(
+        requestId,
+        'LEAVE_FAILED',
+        error instanceof Error ? error.message : 'Leave failed',
+        true,
+      );
     }
   }
 
   @SubscribeMessage('chat:send_message')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      requestId: string;
-      clientMessageId: string;
-      conversationId: string;
-      receiverId: string;
-      type: 'text' | 'image' | 'file' | 'audio' | 'call';
-      content: string;
-      mediaUrl?: string;
-      fileName?: string;
-      fileSize?: number;
-      replyToMessageId?: string;
-      callData?: {
-        callType?: 'audio' | 'video';
-        callStatus?: 'completed' | 'missed' | 'declined';
-        duration?: number;
-        isInitiator?: boolean;
-        wasRejected?: boolean;
-      };
-    },
+    @MessageBody() rawData: SendMessageSocketDto,
   ) {
-    this.logger.log(`RECEIVED MESSAGE: ${JSON.stringify(data)}`);
+    const requestId = String(rawData?.requestId || '');
+    this.logger.log(`RECEIVED MESSAGE: ${JSON.stringify(rawData)}`);
 
     try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: SendMessageSocketDto,
+      })) as SendMessageSocketDto;
+
       this.logger.log(
         `[ChatGateway] Sending message in conversation: ${data.conversationId}`,
       );
 
-      // Get senderBy from JWT token
-      let senderId: string = '';
-      const token =
-        (client.handshake.auth?.token as string) ||
-        (client.handshake.query.token as string);
-
-      if (token?.includes('.')) {
-        try {
-          const secret =
-            this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
-          const decoded = jwt.verify(token, secret) as any;
-          senderId = decoded.sub || decoded.userId || decoded.phoneNumber;
-        } catch (err) {
-          this.logger.warn('Failed to decode token:', err);
-        }
+      const senderId = this.extractUserId(client);
+      if (!senderId) {
+        return this.buildErrorAck(
+          data.requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
       }
+
+      await this.chatMembershipService.assertConversationMember(
+        senderId,
+        data.conversationId,
+      );
 
       // Create message in database
       const message = await this.messageModel.create({
@@ -337,6 +462,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         mediaUrl: data.mediaUrl,
         fileName: data.fileName,
         fileSize: data.fileSize,
+        mimeType: undefined,
         replyToMessageId: data.replyToMessageId,
         clientMessageId: data.clientMessageId,
         messageStatus: 'SENT',
@@ -415,41 +541,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     } catch (error) {
       this.logger.error('Error sending message:', error);
-      return {
-        ok: false,
-        error: {
-          code: 'SEND_FAILED',
-          message: error instanceof Error ? error.message : 'Send failed',
-        },
-      };
+      return this.buildErrorAck(
+        requestId,
+        'SEND_FAILED',
+        error instanceof Error ? error.message : 'Send failed',
+        true,
+      );
     }
   }
 
   @SubscribeMessage('chat:typing')
-  handleTyping(
+  async handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      conversationId: string;
-      isTyping: boolean;
-    },
+    @MessageBody() rawData: TypingSocketDto,
   ) {
     try {
-      let userId: string = '';
-      const token =
-        (client.handshake.auth?.token as string) ||
-        (client.handshake.query.token as string);
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: TypingSocketDto,
+      })) as TypingSocketDto;
 
-      if (token?.includes('.')) {
-        try {
-          const secret =
-            this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
-          const decoded = jwt.verify(token, secret) as any;
-          userId = decoded.sub || decoded.userId || decoded.phoneNumber;
-        } catch (err) {
-          this.logger.warn('Failed to decode token:', err);
-        }
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return;
       }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
 
       this.server
         .to(`conversation:${data.conversationId}`)
@@ -462,5 +582,132 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       this.logger.error('Error handling typing:', error);
     }
+  }
+
+  @SubscribeMessage('chat:message_read')
+  async handleMessageRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      requestId: string;
+      conversationId: string;
+      messageId: string;
+    },
+  ) {
+    try {
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          data?.requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
+      const seenAt = new Date();
+
+      await this.messageModel.updateOne(
+        { _id: data.messageId, conversationId: data.conversationId },
+        {
+          $pull: { seenBy: { userId } },
+        },
+      );
+
+      await this.messageModel.updateOne(
+        { _id: data.messageId, conversationId: data.conversationId },
+        {
+          $addToSet: {
+            seenBy: {
+              userId,
+              seenAt,
+            },
+          },
+        },
+      );
+
+      this.server
+        .to(`conversation:${data.conversationId}`)
+        .emit('chat:message_seen', {
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+          userId,
+          seenAt: seenAt.toISOString(),
+        });
+
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+        messageId: data.messageId,
+        seenAt: seenAt.toISOString(),
+      });
+    } catch (error) {
+      return this.buildErrorAck(
+        data?.requestId,
+        'READ_FAILED',
+        error instanceof Error ? error.message : 'Read status update failed',
+        true,
+      );
+    }
+  }
+
+  private extractUserId(client: Socket): string | null {
+    const token =
+      (client.handshake.auth?.token as string) ||
+      (client.handshake.query.token as string) ||
+      (client.handshake.auth?.userId as string) ||
+      (client.handshake.query.userId as string);
+
+    if (!token) {
+      return null;
+    }
+
+    if (!token.includes('.')) {
+      return token;
+    }
+
+    try {
+      const secret =
+        this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
+      const decoded = jwt.verify(token, secret) as {
+        sub?: string;
+        userId?: string;
+        phoneNumber?: string;
+      };
+
+      return decoded.sub || decoded.userId || decoded.phoneNumber || null;
+    } catch (error) {
+      this.logger.warn(`Invalid JWT token: ${error}`);
+      return null;
+    }
+  }
+
+  private buildSuccessAck(requestId: string, data: unknown) {
+    return {
+      ok: true,
+      requestId,
+      data,
+    };
+  }
+
+  private buildErrorAck(
+    requestId: string | undefined,
+    code: string,
+    message: string,
+    retriable: boolean,
+  ) {
+    return {
+      ok: false,
+      requestId,
+      error: {
+        code,
+        message,
+        retriable,
+      },
+    };
   }
 }

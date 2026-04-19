@@ -24,6 +24,7 @@ import {
   HideConversationDTO,
   RevealConversationDTO,
 } from './dto/hide-conversation.dto';
+import { CreateConversationDto } from './dto/create-conversation.dto';
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -55,6 +56,49 @@ export class ConversationController {
   async getAllByUser(@CurrentUser() user: JwtPayload) {
     if (!user?.userId) throw new BadRequestException('User ID is required');
     return this.conversationService.findAllByUserId(user.userId);
+  }
+
+  @Post()
+  async createConversation(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: CreateConversationDto,
+  ) {
+    const currentUserId = String(user?.userId || '');
+
+    if (!currentUserId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!body?.type) {
+      throw new BadRequestException('type is required');
+    }
+
+    if (body.type === 'PRIVATE') {
+      if (!body.recipientId) {
+        throw new BadRequestException('recipientId is required for PRIVATE');
+      }
+
+      return this.conversationService.getOrCreatePrivateConversation(
+        currentUserId,
+        body.recipientId,
+      );
+    }
+
+    const groupHandler = this.conversationService as {
+      createGroupConversation: (payload: {
+        creatorId: string;
+        groupName: string;
+        memberIds?: string[];
+        memberNicknames?: Array<{ userId: string; nickname?: string }>;
+      }) => Promise<unknown>;
+    };
+
+    return groupHandler.createGroupConversation({
+      creatorId: currentUserId,
+      groupName: String(body.groupName || ''),
+      memberIds: body.memberIds,
+      memberNicknames: body.memberNicknames,
+    });
   }
 
   /**
@@ -164,6 +208,25 @@ export class ConversationController {
       console.error(error);
       throw error;
     }
+  }
+
+  @Get(':conversationId/media')
+  async getConversationMedia(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.getConversationMedia({
+      conversationId,
+      userId: user.userId,
+      cursor,
+      limit: limit ? Number(limit) : 30,
+    });
   }
 
   /**
@@ -481,6 +544,56 @@ export class ConversationController {
     );
   }
 
+  @Patch(':conversationId/hidden')
+  updateHiddenConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { hidden?: boolean },
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (typeof body?.hidden !== 'boolean') {
+      throw new BadRequestException('hidden must be boolean');
+    }
+
+    const handler = this.conversationService as {
+      setConversationHidden: (
+        conversationId: string,
+        userId: string,
+        hidden: boolean,
+      ) => Promise<unknown>;
+    };
+
+    const userId = String(user.userId);
+
+    const resultPromise = handler.setConversationHidden(
+      conversationId,
+      userId,
+      body.hidden,
+    );
+
+    return resultPromise.then((result) => {
+      const updatedAt =
+        typeof result === 'object' && result && 'updatedAt' in result
+          ? String(
+              (result as { updatedAt?: string }).updatedAt ||
+                new Date().toISOString(),
+            )
+          : new Date().toISOString();
+
+      this.chatGateway.emitConversationHiddenUpdated({
+        conversationId,
+        userId,
+        hidden: body.hidden as boolean,
+        updatedAt,
+      });
+
+      return result;
+    });
+  }
+
   /**
    * MỞ KHÓA conversation (tiết lộ sau khi ẩn)
    *
@@ -521,10 +634,22 @@ export class ConversationController {
       throw new BadRequestException('User ID is required');
     }
 
-    return this.conversationService.clearChatHistory(
+    const result = await this.conversationService.clearChatHistory(
       conversationId,
       user.userId,
     );
+
+    this.chatGateway.emitConversationHistoryCleared({
+      conversationId,
+      userId: String(user.userId),
+      deletedMessagesCount:
+        typeof result?.deletedMessagesCount === 'number'
+          ? result.deletedMessagesCount
+          : 0,
+      clearedAt: new Date().toISOString(),
+    });
+
+    return result;
   }
 
   /**
