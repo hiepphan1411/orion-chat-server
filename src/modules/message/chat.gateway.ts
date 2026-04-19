@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 
 import {
   WebSocketGateway,
@@ -13,21 +12,15 @@ import {
 import { Logger, Inject, ValidationPipe } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
-import { MessageType } from 'src/common/enums/message-type.enum';
 import { NotificationService } from '../notifications/notification.service';
-
-type ChatClientMessageType =
-  | 'text'
-  | 'image'
-  | 'file'
-  | 'audio'
-  | 'video'
-  | 'call';
+import { ConversationParticipant } from '../conversation/entities/conversation-participant.entity';
 import {
   JoinConversationSocketDto,
   SendMessageSocketDto,
@@ -81,6 +74,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly usersService: UsersService,
     private readonly notificationService: NotificationService,
     private readonly chatMembershipService: ChatMembershipService,
+    @InjectRepository(ConversationParticipant)
+    private readonly participantRepo: Repository<ConversationParticipant>,
   ) {}
 
   handleConnection(client: Socket) {
@@ -93,7 +88,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     onlineUsers.set(userId, client.id);
-    client.join(`user:${userId}`);
+    void client.join(`user:${userId}`);
     this.logger.log(`User ${userId} connected: ${client.id}`);
 
     client.broadcast.emit('presence:user_online', {
@@ -361,7 +356,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(
         `[ChatGateway] Joining conversation: ${data.conversationId}`,
       );
-      client.join(`conversation:${data.conversationId}`);
+      void client.join(`conversation:${data.conversationId}`);
 
       return this.buildSuccessAck(data.requestId, {
         conversationId: data.conversationId,
@@ -405,7 +400,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.conversationId,
       );
 
-      client.leave(`conversation:${data.conversationId}`);
+      void client.leave(`conversation:${data.conversationId}`);
       return this.buildSuccessAck(data.requestId, {
         conversationId: data.conversationId,
       });
@@ -469,7 +464,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         callData: data.callData || null,
       });
 
-      this.logger.log(`[ChatGateway] Message created: ${message._id}`);
+      this.logger.log(`[ChatGateway] Message created: ${String(message._id)}`);
 
       // Fetch sender info to include in message emit
       let senderName = senderId;
@@ -504,9 +499,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         callData: data.callData || null,
       });
 
-      // ACK back to sender via return (Socket.io auto-invokes callback)
-      // chỉ gửi notification cho người nhận trong direct chat
-      if (data.receiverId && data.receiverId !== senderId) {
+      // Gửi notification cho tất cả thành viên còn lại trong conversation
+      // để hỗ trợ cả PRIVATE và GROUP chat.
+      const participants = await this.participantRepo.find({
+        where: { conversationId: data.conversationId },
+      });
+
+      const receiverIds = participants
+        .map((item) => item.userId)
+        .filter((userId) => userId && userId !== senderId);
+
+      if (receiverIds.length > 0) {
         const contentPreview =
           data.type === 'text'
             ? data.content
@@ -514,19 +517,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               ? 'Ban co mot lich su cuoc goi moi'
               : `Da gui ${data.type}`;
 
-        await this.notificationService.createAndEmit({
-          userId: data.receiverId,
-          type: data.type === 'call' ? 'call' : 'message',
-          title: senderName || 'Tin nhan moi',
-          body: contentPreview,
-          link: '/chat',
-          metadata: {
-            conversationId: data.conversationId,
-            senderId,
-            messageId: String(message._id),
-            messageType: data.type,
-          },
-        });
+        await Promise.allSettled(
+          receiverIds.map((receiverId) =>
+            this.notificationService.createAndEmit({
+              userId: receiverId,
+              type: data.type === 'call' ? 'call' : 'message',
+              title: senderName || '',
+              body: contentPreview,
+              link: '/chat',
+              metadata: {
+                conversationId: data.conversationId,
+                senderId,
+                messageId: String(message._id),
+                messageType: data.type,
+              },
+            }),
+          ),
+        );
       }
 
       // ACK back to sender
