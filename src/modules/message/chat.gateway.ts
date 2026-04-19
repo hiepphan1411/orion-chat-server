@@ -20,6 +20,11 @@ import * as jwt from 'jsonwebtoken';
 import { Message, MessageDocument } from './message.schema';
 import { UsersService } from '../users/users.service';
 import { NotificationService } from '../notifications/notification.service';
+import {
+  Conversation,
+  ConversationType,
+} from '../conversation/entities/conversation.schema';
+import { GroupConversation } from '../conversation/entities/group-conversation.entity';
 import { ConversationParticipant } from '../conversation/entities/conversation-participant.entity';
 import {
   JoinConversationSocketDto,
@@ -74,6 +79,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly usersService: UsersService,
     private readonly notificationService: NotificationService,
     private readonly chatMembershipService: ChatMembershipService,
+    @InjectRepository(Conversation)
+    private readonly conversationRepo: Repository<Conversation>,
+    @InjectRepository(GroupConversation)
+    private readonly groupConversationRepo: Repository<GroupConversation>,
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
   ) {}
@@ -510,6 +519,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         .filter((userId) => userId && userId !== senderId);
 
       if (receiverIds.length > 0) {
+        const conversation = await this.conversationRepo.findOne({
+          where: { conversationId: data.conversationId },
+        });
+
+        const conversationType = conversation?.type || ConversationType.PRIVATE;
+
+        const groupInfo =
+          conversationType === ConversationType.GROUP
+            ? await this.groupConversationRepo.findOne({
+                where: { conversationId: data.conversationId },
+              })
+            : null;
+
         const contentPreview =
           data.type === 'text'
             ? data.content
@@ -528,8 +550,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               metadata: {
                 conversationId: data.conversationId,
                 senderId,
+                senderName,
                 messageId: String(message._id),
                 messageType: data.type,
+                conversationType,
+                groupName: groupInfo?.groupName,
               },
             }),
           ),
