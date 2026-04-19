@@ -1,18 +1,23 @@
 import {
   ConnectedSocket,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 
 // Track multiple socket connections per user
 // Map<userId, Set<socketId>>
 const onlineUsers = new Map<string, Set<string>>();
+const socketToUser = new Map<string, string>();
+const userLastSeen = new Map<string, number>();
+const HEARTBEAT_TIMEOUT_MS = 120000;
+const PRESENCE_SWEEP_INTERVAL_MS = 30000;
 
 @WebSocketGateway({
   cors: {
@@ -21,12 +26,26 @@ const onlineUsers = new Map<string, Set<string>>();
   namespace: '/presence',
 })
 export class PresenceGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger('PresenceGateway');
+  private sweepTimer: NodeJS.Timeout | null = null;
+
+  afterInit() {
+    this.sweepTimer = setInterval(() => {
+      this.pruneStaleUsers();
+    }, PRESENCE_SWEEP_INTERVAL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
 
   handleConnection(client: Socket) {
     try {
@@ -40,10 +59,12 @@ export class PresenceGateway
       }
 
       // Add socket ID to user's connections
-      if (!onlineUsers.has(userId)) {
-        onlineUsers.set(userId, new Set());
-      }
-      onlineUsers.get(userId)!.add(client.id);
+      const userSockets = onlineUsers.get(userId) ?? new Set<string>();
+      const wasOffline = userSockets.size === 0;
+      userSockets.add(client.id);
+      onlineUsers.set(userId, userSockets);
+      socketToUser.set(client.id, userId);
+      userLastSeen.set(userId, Date.now());
 
       // Join user-specific room for targeted messaging
       void client.join(`user:${userId}`);
@@ -59,7 +80,10 @@ export class PresenceGateway
         `Presence connected: ${userId} (${client.id}) [${platform}]. Devices: ${onlineUsers.get(userId)!.size}, Total online: ${onlineUsers.size}`,
       );
 
-      client.broadcast.emit('presence:user-online', { userId });
+      // Only broadcast online when user transitions from offline -> online.
+      if (wasOffline) {
+        client.broadcast.emit('presence:user-online', { userId });
+      }
     } catch (error) {
       this.logger.error('Presence connection error:', error);
       client.disconnect();
@@ -68,28 +92,28 @@ export class PresenceGateway
 
   handleDisconnect(client: Socket) {
     try {
-      let disconnectedUserId: string | null = null;
-
-      for (const [userId, socketIds] of onlineUsers.entries()) {
-        if (socketIds.has(client.id)) {
-          socketIds.delete(client.id);
-          disconnectedUserId = userId;
-
-          // Clean up user entry if no more sockets
-          if (socketIds.size === 0) {
-            onlineUsers.delete(userId);
-          }
-          break;
-        }
+      const userId = socketToUser.get(client.id);
+      if (!userId) {
+        return;
       }
 
-      if (disconnectedUserId) {
+      socketToUser.delete(client.id);
+      const socketIds = onlineUsers.get(userId);
+      if (!socketIds) {
+        return;
+      }
+
+      socketIds.delete(client.id);
+
+      if (socketIds.size === 0) {
+        onlineUsers.delete(userId);
+        userLastSeen.set(userId, Date.now());
+        this.logger.log(`Presence disconnected: ${userId}. Online: ${onlineUsers.size}`);
+        client.broadcast.emit('presence:user-offline', { userId });
+      } else {
         this.logger.log(
-          `Presence disconnected: ${disconnectedUserId}. Online: ${onlineUsers.size}`,
+          `Presence socket disconnected: ${userId} (${client.id}). Remaining devices: ${socketIds.size}`,
         );
-        client.broadcast.emit('presence:user-offline', {
-          userId: disconnectedUserId,
-        });
       }
     } catch (error) {
       this.logger.error('Presence disconnect error:', error);
@@ -98,8 +122,58 @@ export class PresenceGateway
 
   @SubscribeMessage('presence:get-online')
   handleGetOnlineUsers(@ConnectedSocket() client: Socket) {
+    this.pruneStaleUsers();
+
+    const now = Date.now();
+    const users = Array.from(onlineUsers.keys());
+
     client.emit('presence:online-list', {
-      users: Array.from(onlineUsers.keys()),
+      users,
+      onlineCount: users.length,
+      serverTime: now,
+    });
+  }
+
+  private pruneStaleUsers() {
+    if (!this.server?.sockets?.sockets) {
+      return;
+    }
+
+    const now = Date.now();
+    for (const [userId, socketIds] of onlineUsers.entries()) {
+      for (const socketId of Array.from(socketIds)) {
+        const isSocketAlive = this.server.sockets.sockets.has(socketId);
+        if (!isSocketAlive) {
+          socketIds.delete(socketId);
+          socketToUser.delete(socketId);
+        }
+      }
+
+      const lastSeen = userLastSeen.get(userId) ?? 0;
+      const staleByHeartbeat = now - lastSeen > HEARTBEAT_TIMEOUT_MS;
+
+      if (socketIds.size === 0 || staleByHeartbeat) {
+        onlineUsers.delete(userId);
+        userLastSeen.set(userId, now);
+        this.server.emit('presence:user-offline', { userId });
+      }
+    }
+  }
+
+  @SubscribeMessage('presence:heartbeat')
+  handleHeartbeat(
+    @ConnectedSocket() client: Socket,
+    payload?: { userId?: string },
+  ) {
+    const resolvedUserId = socketToUser.get(client.id) ?? payload?.userId;
+    if (!resolvedUserId) {
+      return;
+    }
+
+    userLastSeen.set(resolvedUserId, Date.now());
+    client.emit('presence:heartbeat:ack', {
+      userId: resolvedUserId,
+      serverTime: Date.now(),
     });
   }
 
