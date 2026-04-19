@@ -49,8 +49,10 @@ export class MessageController {
   ) {}
 
   @Get()
-  findAll() {
-    return this.messageService.findAll();
+  async findAll() {
+    const messages = await this.messageService.findAll();
+    console.log('Message list:', messages);
+    return messages;
   }
 
   @Post()

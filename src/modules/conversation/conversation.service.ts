@@ -43,6 +43,11 @@ type MessageDetail = {
   revokedBy?: string;
   revokedAt?: Date | string;
   replyToMessageId?: string | null;
+  reactions?: Array<{
+    userId: string;
+    emoji: string;
+    reactedAt: Date | string;
+  }>;
   seenBy?: Array<{ userId: string; seenAt: Date | string }>;
   createdAt?: Date | string;
   updatedAt?: Date | string;
@@ -71,6 +76,11 @@ type ConversationMessagesResult = {
     conversationId: string;
     senderId: string;
     content: string;
+    reactions: Array<{
+      userId: string;
+      emoji: string;
+      reactedAt: Date | string;
+    }>;
     attachments: Array<{
       mediaUrl?: string;
       fileName?: string;
@@ -530,6 +540,13 @@ export class ConversationService {
         conversationId,
         senderId,
         content: String(item.content || ''),
+        reactions: Array.isArray(item.reactions)
+          ? item.reactions.map((reaction) => ({
+              userId: String(reaction.userId || ''),
+              emoji: String(reaction.emoji || ''),
+              reactedAt: this.toDate(reaction.reactedAt) || reaction.reactedAt,
+            }))
+          : [],
         attachments: item.mediaUrl
           ? [
               {
@@ -547,7 +564,8 @@ export class ConversationService {
         replyToMessagePreview: item.replyToMessageId
           ? replyPreviewMap.get(item.replyToMessageId) || undefined
           : undefined,
-        canRecall: isOwnMessage && within24Hours && !recalled && !deletedByAdmin,
+        canRecall:
+          isOwnMessage && within24Hours && !recalled && !deletedByAdmin,
         canAdminDelete:
           canManageAsAdmin &&
           !isOwnMessage &&
