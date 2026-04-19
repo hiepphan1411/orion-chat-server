@@ -260,6 +260,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .emit('group:dissolved', payload);
   }
 
+  emitGroupInfoUpdated(payload: {
+    groupId: string;
+    groupName?: string;
+    groupAvatar?: string;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:info_updated', payload);
+  }
+
   emitConversationHiddenUpdated(payload: {
     conversationId: string;
     userId: string;

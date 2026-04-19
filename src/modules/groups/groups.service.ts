@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { S3UploadService } from 'src/common/services/s3-upload.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Conversation } from '../conversation/entities/conversation.schema';
@@ -29,6 +30,7 @@ export class GroupsService {
     private readonly participantRepo: Repository<ConversationParticipant>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly s3UploadService: S3UploadService,
   ) {}
 
   private isAdminRole(role: GroupMemberRole): boolean {
@@ -329,6 +331,77 @@ export class GroupsService {
       dissolvedBy: actorUserId,
       dissolvedAt: new Date().toISOString(),
       status: 'dissolved',
+    };
+  }
+
+  async updateGroupName(
+    groupId: string,
+    actorUserId: string,
+    groupName: string,
+  ) {
+    const actor = await this.requireGroupMembership(groupId, actorUserId);
+
+    if (!this.isAdminRole(actor.role)) {
+      throw new ForbiddenException('FORBIDDEN');
+    }
+
+    const normalizedName = String(groupName || '').trim();
+    if (!normalizedName || normalizedName.length < 2) {
+      throw new BadRequestException('GROUP_NAME_INVALID');
+    }
+
+    await this.groupRepo.update(
+      { conversationId: groupId },
+      { groupName: normalizedName },
+    );
+
+    return {
+      groupId,
+      groupName: normalizedName,
+      updatedBy: actorUserId,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async updateGroupAvatar(
+    groupId: string,
+    actorUserId: string,
+    file: Express.Multer.File,
+  ) {
+    const actor = await this.requireGroupMembership(groupId, actorUserId);
+
+    if (!this.isAdminRole(actor.role)) {
+      throw new ForbiddenException('FORBIDDEN');
+    }
+
+    if (!file) {
+      throw new BadRequestException('GROUP_AVATAR_FILE_REQUIRED');
+    }
+
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException('GROUP_AVATAR_MUST_BE_IMAGE');
+    }
+
+    const maxBytes = 5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      throw new BadRequestException('GROUP_AVATAR_TOO_LARGE');
+    }
+
+    const uploaded = await this.s3UploadService.uploadFile(
+      file,
+      `groups/${groupId}/avatars`,
+    );
+
+    await this.groupRepo.update(
+      { conversationId: groupId },
+      { groupAvatar: uploaded.url },
+    );
+
+    return {
+      groupId,
+      groupAvatar: uploaded.url,
+      updatedBy: actorUserId,
+      updatedAt: new Date().toISOString(),
     };
   }
 }

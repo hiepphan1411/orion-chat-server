@@ -2,13 +2,16 @@ import {
   BadRequestException,
   Body,
   Controller,
+  UploadedFile,
   Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { JwtPayload } from 'jsonwebtoken';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -17,6 +20,7 @@ import { AddGroupMembersDto } from './dto/add-group-members.dto';
 import { AdminTransferDto } from './dto/admin-transfer.dto';
 import { LeaveGroupDto } from './dto/leave-group.dto';
 import { UpdateGroupAutoDeleteDto } from './dto/update-group-auto-delete.dto';
+import { UpdateGroupNameDto } from './dto/update-group-name.dto';
 import { GroupsService } from './groups.service';
 
 @Controller('groups')
@@ -146,6 +150,55 @@ export class GroupsController {
       groupId,
       dissolvedBy: result.dissolvedBy,
       dissolvedAt: result.dissolvedAt,
+    });
+
+    return result;
+  }
+
+  @Patch(':groupId/name')
+  async updateGroupName(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateGroupNameDto,
+  ) {
+    if (!user?.userId) throw new BadRequestException('User ID is required');
+
+    const result = await this.groupsService.updateGroupName(
+      groupId,
+      user.userId,
+      dto.groupName,
+    );
+
+    this.chatGateway.emitGroupInfoUpdated({
+      groupId,
+      groupName: result.groupName,
+      updatedBy: result.updatedBy,
+      updatedAt: result.updatedAt,
+    });
+
+    return result;
+  }
+
+  @Patch(':groupId/avatar')
+  @UseInterceptors(FileInterceptor('file'))
+  async updateGroupAvatar(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @CurrentUser() user: JwtPayload,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!user?.userId) throw new BadRequestException('User ID is required');
+
+    const result = await this.groupsService.updateGroupAvatar(
+      groupId,
+      user.userId,
+      file,
+    );
+
+    this.chatGateway.emitGroupInfoUpdated({
+      groupId,
+      groupAvatar: result.groupAvatar,
+      updatedBy: result.updatedBy,
+      updatedAt: result.updatedAt,
     });
 
     return result;
