@@ -303,6 +303,14 @@ export class AuthService {
 
   async completeRegister(data: CompleteRegisterDto) {
     try {
+      console.log('[AuthService.completeRegister] Received data:', data);
+      console.log('[AuthService.completeRegister] Field check:', {
+        phoneNumber: data.phoneNumber,
+        password: data.password,
+        fullName: data.fullName,
+        birthDate: data.birthDate,
+      });
+
       // Validate required fields
       if (
         !data.phoneNumber ||
@@ -401,6 +409,25 @@ export class AuthService {
           timestamp: new Date().toISOString(),
         });
 
+      // Fallback: emit to the user's general room as well in case platform room
+      // membership doesn't match (e.g., platform label mismatch on client)
+      try {
+        this.presenceGateway.server
+          .to(`user:${userId}`)
+          .emit('session:conflict', {
+            message: `Tài khoản của bạn được đăng nhập từ ${newPlatform} khác. Phiên hiện tại sẽ bị đóng.`,
+            oldPlatform,
+            newPlatform,
+            timestamp: new Date().toISOString(),
+          });
+
+        this.logger.log(
+          `[Session Conflict] Emitted fallback session:conflict to all devices of user ${userId}`,
+        );
+      } catch (err) {
+        this.logger.warn('[Session Conflict] Fallback emit failed:', err);
+      }
+
       this.logger.log(
         `[Session Conflict] Notified ALL ${oldPlatform} devices of user ${userId} about login from ${newPlatform}`,
       );
@@ -420,10 +447,6 @@ export class AuthService {
         throw new BadRequestException('Số điện thoại và mật khẩu là bắt buộc');
       }
 
-      this.logger.log(
-        `[Login Service] Full devicePayload: ${JSON.stringify(devicePayload)}`,
-      );
-
       const platform = (devicePayload?.deviceType || 'web').toLowerCase();
 
       this.logger.log(
@@ -432,7 +455,6 @@ export class AuthService {
       this.logger.log(
         `[Login] devicePayload.deviceType: ${devicePayload?.deviceType}`,
       );
-      this.logger.log(`[Login] PLATFORM DECIDED: ${platform}`);
 
       // Find user by phone number
 
@@ -463,22 +485,13 @@ export class AuthService {
       const now = new Date();
 
       // Check if there's an existing session and notify old device to logout
-      // Only emit if session token exists AND is different from new token
-      if (
-        platform === 'mobile' &&
-        user.mobileSessionToken &&
-        user.mobileSessionToken !== token
-      ) {
+      if (platform === 'mobile' && user.mobileSessionToken) {
         // Notify old mobile device - will logout automatically
         this.emitSessionConflict(user.userId, 'mobile', 'mobile');
         // Add delay to ensure old socket receives event before token is overwritten
         // Need 500ms for client to establish socket connection
         await new Promise((resolve) => setTimeout(resolve, 500));
-      } else if (
-        platform === 'web' &&
-        user.webSessionToken &&
-        user.webSessionToken !== token
-      ) {
+      } else if (platform === 'web' && user.webSessionToken) {
         // Notify old web device - will logout automatically
         this.emitSessionConflict(user.userId, 'web', 'web');
         // Add delay to ensure old socket receives event before token is overwritten
@@ -490,25 +503,16 @@ export class AuthService {
         user.mobileSessionToken = token;
         user.mobileSessionStartedAt = now;
         user.mobileLastActivityAt = Date.now();
-        this.logger.log(
-          `[Login] ✅ Saved token to mobileSessionToken (platform=mobile)`,
-        );
       } else if (platform === 'web') {
         user.webSessionToken = token;
         user.webSessionStartedAt = now;
         user.webLastActivityAt = Date.now();
-        this.logger.log(
-          `[Login] ✅ Saved token to webSessionToken (platform=web)`,
-        );
       } else {
         // mặc định: coi như web để tương thích ngược
         user.webSessionToken = token;
         user.webSessionStartedAt = now;
         user.webLastActivityAt = Date.now();
         user.currentSessionToken = token;
-        this.logger.log(
-          `[Login] ⚠️ Platform unknown, defaulting to webSessionToken`,
-        );
       }
 
       user.lastLoginAt = now;
@@ -524,6 +528,16 @@ export class AuthService {
           }`,
         );
       }
+
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`LOGIN SUCCESSFUL`);
+      console.log(`${'='.repeat(60)}`);
+      console.log(`Phone: ${phoneNumber}`);
+      console.log(`Full Name: ${user.fullName}`);
+      console.log(`Platform: ${platform || 'web'}`);
+      console.log(`Token: ${token.substring(0, 50)}...`);
+      console.log(`Login Time: ${new Date().toISOString()}`);
+      console.log(`${'='.repeat(60)}\n`);
 
       // trả về dữ liệu người dùng với token JWT
       return {
@@ -581,13 +595,13 @@ export class AuthService {
         user.mobileSessionToken = null as unknown as string;
         user.mobileSessionStartedAt = null as unknown as Date;
         user.mobileLastActivityAt = null as unknown as number;
-        // Emit logout notification to mobile
+        // Emit session conflict to notify other mobile devices
         this.emitSessionConflict(user.userId, 'mobile', 'mobile');
       } else if (platform === 'web') {
         user.webSessionToken = null as unknown as string;
         user.webSessionStartedAt = null as unknown as Date;
         user.webLastActivityAt = null as unknown as number;
-        // Emit logout notification to web
+        // Emit session conflict to notify other web devices
         this.emitSessionConflict(user.userId, 'web', 'web');
       } else {
         // Default: xóa tất cả session
