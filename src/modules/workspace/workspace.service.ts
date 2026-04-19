@@ -14,6 +14,7 @@ import { TaskBoard } from '../task-board/entities/task-board.entity';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class WorkspaceService {
@@ -109,11 +110,34 @@ export class WorkspaceService {
   }
 
   /**
-   * Xóa workspace
+   * Remove workspace
    */
   async remove(id: string) {
     const workspace = await this.findOne(id);
     return this.workspaceRepo.remove(workspace);
+  }
+
+  /**
+   * Generate invite link cho workspace
+   */
+  async generateInviteLink(workspaceId: string) {
+    const workspace = await this.findOne(workspaceId);
+
+    // Generate token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+    const inviteUrl = `${baseUrl}/workspace/join?token=${token}&workspaceId=${workspaceId}`;
+    const qrData = inviteUrl;
+
+    return {
+      inviteUrl,
+      qrData,
+      token,
+      workspaceId,
+      expiresAt,
+    };
   }
 
   /**
@@ -188,6 +212,111 @@ export class WorkspaceService {
     }
 
     return result;
+  }
+
+  /**
+   * Get dashboard stats cho workspace (phòng) - format cho dashboard UI
+   * Trả về summary stats, boardStats, recentActivities, trendLast7Days
+   */
+  async getDashboardStats(workspaceId: string) {
+    const workspace = await this.findOne(workspaceId);
+    const boards = await this.taskBoardRepo.find({
+      where: { workspace: { workspaceId } },
+    });
+    const boardIds = boards.map((b) => b.boardId);
+
+    // Get all tasks
+    const allTasks = await this.taskRepo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.assignees', 'assignees')
+      .leftJoinAndSelect('assignees.user', 'assigneeUser')
+      .leftJoinAndSelect('t.board', 'board')
+      .leftJoinAndSelect('t.createdBy', 'createdBy')
+      .where(boardIds.length > 0 ? 't.board.boardId IN (:...boardIds)' : '1=0', { boardIds })
+      .orderBy('t.createdAt', 'DESC')
+      .getMany();
+
+    const now = new Date();
+
+    // Calculate summary stats
+    const totalTasks = allTasks.length;
+    const completedTasks = allTasks.filter((t) => t.status === 'DONE').length;
+    const inProgressTasks = allTasks.filter((t) => t.status === 'IN_PROGRESS').length;
+    const reviewTasks = allTasks.filter((t) => t.status === 'REVIEW').length;
+    const todoTasks = allTasks.filter((t) => t.status === 'TODO').length;
+    const overdueTasks = allTasks.filter(
+      (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'DONE',
+    ).length;
+
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+    // Board stats
+    const boardStats = boards.map((board) => {
+      const boardTasks = allTasks.filter((t) => t.board?.boardId === board.boardId);
+      return {
+        boardId: board.boardId,
+        boardName: board.boardName,
+        totalTasks: boardTasks.length,
+        completedTasks: boardTasks.filter((t) => t.status === 'DONE').length,
+        inProgressTasks: boardTasks.filter((t) => t.status === 'IN_PROGRESS').length,
+        overdueTasks: boardTasks.filter(
+          (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'DONE',
+        ).length,
+      };
+    });
+
+    // Recent activities (5 tasks gần nhất)
+    const recentActivities = allTasks.slice(0, 5).map((task) => ({
+      activityId: task.taskId,
+      action: 'task_' + task.status.toLowerCase(),
+      description: `Task "${task.title}" - ${task.status}`,
+      timestamp: task.updatedAt?.toISOString() || task.createdAt.toISOString(),
+      task: {
+        taskId: task.taskId,
+        title: task.title,
+      },
+      user: task.createdBy,
+    }));
+
+    // Trend last 7 days
+    const trendLast7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const dayTasks = allTasks.filter(
+        (t) => new Date(t.completedAt || t.updatedAt).getTime() >= date.getTime() &&
+               new Date(t.completedAt || t.updatedAt).getTime() < nextDate.getTime()
+      );
+      
+      const completed = dayTasks.filter((t) => t.status === 'DONE').length;
+      
+      (trendLast7Days as Array<{date: string; completed: number}>).push({
+        date: date.toISOString().split('T')[0],
+        completed,
+      });
+    }
+
+    return {
+      summary: {
+        totalTasks,
+        completedTasks,
+        inProgressTasks,
+        reviewTasks,
+        todoTasks,
+        overdueTasks,
+        completionRate,
+        totalBoards: boards.length,
+        totalMembers: workspace.members?.length ?? 0,
+      },
+      boardStats,
+      recentActivities,
+      trendLast7Days,
+    };
   }
 
   /**

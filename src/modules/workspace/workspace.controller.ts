@@ -49,8 +49,18 @@ export class WorkspaceController {
     return this.workspaceService.getWorkload(id);
   }
 
+  @Get(':id/dashboard-stats')
+  getDashboardStats(@Param('id') id: string) {
+    return this.workspaceService.getDashboardStats(id);
+  }
+
   @Get(':id/reports')
   getReports(@Param('id') id: string) {
     return this.workspaceService.getReports(id);
+  }
+
+  @Post(':id/invite-link')
+  generateInviteLink(@Param('id') id: string) {
+    return this.workspaceService.generateInviteLink(id);
   }
 }
