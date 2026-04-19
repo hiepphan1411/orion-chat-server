@@ -265,6 +265,7 @@ model group_conversation {
   groupName                  String                       @db.VarChar
   groupAvatar                String?                      @db.VarChar
   ownerId                    String                       @db.Uuid
+  joinRequireApproval        Boolean                      @default(true)
   calendar_event_participant calendar_event_participant[]
   conversation               conversation                 @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_643c9854b49f12119f37e3b509b")
   user                       user                         @relation(fields: [ownerId], references: [userId], onDelete: NoAction, onUpdate: NoAction, map: "FK_bd06651f5f20ad5b2f69a241878")
@@ -285,6 +286,24 @@ model group_invite {
   group_conversation                    group_conversation?      @relation(fields: [groupConversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction, map: "FK_6afe4e31d63cc7db54351a999b3")
 
   @@index([groupConversationId, inviteeUserId, status], map: "IDX_e6504943e1cff300464c80d59f")
+}
+
+model group_join_request {
+  requestId                    String                        @id @default(dbgenerated("public.uuid_generate_v4()")) @db.Uuid
+  status                       group_join_request_status_enum @default(pending)
+  message                      String?                       @db.VarChar
+  createdAt                    DateTime                      @default(now()) @db.Timestamp(6)
+  respondedAt                  DateTime?                     @db.Timestamp(6)
+  groupConversationId          String?                       @db.Uuid
+  requesterId                  String?                       @db.Uuid
+  approvedBy                   String?                       @db.Uuid
+  rejectedBy                   String?                       @db.Uuid
+  group_conversation           group_conversation?           @relation("group_join_request_group", fields: [groupConversationId], references: [conversationId], onDelete: Cascade, onUpdate: NoAction)
+  requester                    user?                         @relation("group_join_request_requester", fields: [requesterId], references: [userId], onDelete: Cascade, onUpdate: NoAction)
+  approved_by_user             user?                         @relation("group_join_request_approver", fields: [approvedBy], references: [userId], onDelete: SetNull, onUpdate: NoAction)
+  rejected_by_user             user?                         @relation("group_join_request_rejector", fields: [rejectedBy], references: [userId], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([groupConversationId, requesterId, status])
 }
 
 model group_member {
@@ -699,6 +718,12 @@ enum group_invite_status_enum {
   accepted
   declined
   revoked
+}
+
+enum group_join_request_status_enum {
+  pending
+  approved
+  rejected
 }
 
 enum group_member_role_enum {

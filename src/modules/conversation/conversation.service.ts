@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Injectable,
   NotFoundException,
@@ -23,6 +22,11 @@ import {
   GroupMember,
   GroupMemberRole,
 } from '../group-member/entities/group-member.entity';
+
+const bcryptLib = bcrypt as unknown as {
+  hash: (value: string, saltRounds: number) => Promise<string>;
+  compare: (value: string, hash: string) => Promise<boolean>;
+};
 
 type MessageDetail = {
   _id?: string;
@@ -88,12 +92,16 @@ type ConversationMessagesResult = {
       mimeType?: string;
     }>;
     createdAt: Date | string;
+    isPinned: boolean;
     recalled: boolean;
     deletedByAdmin: boolean;
     replyToMessageId: string | null;
     replyToMessagePreview?: {
+      messageId: string;
+      content: string;
       senderName: string;
       snippet: string;
+      createdAt: Date | string | null;
     };
     canRecall: boolean;
     canAdminDelete: boolean;
@@ -104,6 +112,7 @@ type ConversationMessagesResult = {
 type ConversationView = {
   conversationId: string;
   type: string;
+  conversationStatus: 'active' | 'dissolved' | 'left_or_removed';
   autoDeleteDuration: number;
   createdAt: Date;
   myRole: string;
@@ -193,6 +202,22 @@ export class ConversationService {
       (m) => m.conversation.conversationId,
     );
 
+    const groupMemberships = await this.groupMemberRepo.find({
+      where: {
+        user: { userId },
+        group: { conversationId: In(conversationIds) },
+      },
+      relations: ['group'],
+    });
+
+    const groupMembershipMap = new Map<string, GroupMember>();
+    for (const groupMembership of groupMemberships) {
+      groupMembershipMap.set(
+        groupMembership.group.conversationId,
+        groupMembership,
+      );
+    }
+
     const messageMap = await this.getLastMessageMap(conversationIds, userId);
 
     // ✅ Lấy block status của từng conversation
@@ -214,13 +239,44 @@ export class ConversationService {
       const convId = m.conversation.conversationId;
       const latestMsg = messageMap.get(convId);
       const blockStatus = blockStatusMap.get(convId);
+      const conversationStatus = this.resolveConversationStatus(
+        m,
+        groupMembershipMap.get(convId),
+      );
 
-      return this.toConversationView(m, latestMsg ?? null, blockStatus);
+      return this.toConversationView(
+        m,
+        latestMsg ?? null,
+        blockStatus,
+        conversationStatus,
+      );
     });
   }
 
   async findDetailById(conversationId: string, userId: string) {
-    const membership = await this.requireMembership(conversationId, userId);
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+      relations: [
+        'conversation',
+        'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
+        'conversation.participants',
+        'conversation.participants.user',
+      ],
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const groupMembership = await this.groupMemberRepo.findOne({
+      where: {
+        group: { conversationId },
+        user: { userId },
+      },
+      relations: ['group'],
+    });
 
     const lastMessageArr = await this.fetchConversationMessages(
       conversationId,
@@ -233,8 +289,17 @@ export class ConversationService {
 
     // ✅ Lấy block status của conversation
     const blockStatus = await this.getConversationBlockStatus(conversationId);
+    const conversationStatus = this.resolveConversationStatus(
+      membership,
+      groupMembership,
+    );
 
-    return this.toConversationView(membership, latestMsg, blockStatus);
+    return this.toConversationView(
+      membership,
+      latestMsg,
+      blockStatus,
+      conversationStatus,
+    );
   }
 
   /**
@@ -495,17 +560,28 @@ export class ConversationService {
 
     const replyPreviewMap = new Map<
       string,
-      { senderName: string; snippet: string }
+      {
+        messageId: string;
+        content: string;
+        senderName: string;
+        snippet: string;
+        createdAt: Date | string | null;
+      }
     >();
 
     if (replyToIds.length > 0) {
       const replyMessages = await this.messageModel
-        .find({ _id: { $in: replyToIds } })
+        .find({
+          _id: { $in: replyToIds },
+          conversationId,
+          isDeleted: false,
+        })
         .lean<
           Array<{
             _id: unknown;
             senderBy: string;
             content?: string;
+            createdAt?: Date | string;
           }>
         >();
 
@@ -518,8 +594,11 @@ export class ConversationService {
       for (const msg of replyMessages) {
         const snippet = String(msg.content || '').slice(0, 100);
         replyPreviewMap.set(String(msg._id), {
+          messageId: String(msg._id),
+          content: String(msg.content || ''),
           senderName: senderMap.get(msg.senderBy) || 'Unknown',
           snippet,
+          createdAt: this.toDate(msg.createdAt) || msg.createdAt || null,
         });
       }
     }
@@ -558,6 +637,7 @@ export class ConversationService {
             ]
           : [],
         createdAt: createdAtDate,
+        isPinned: !!item.isPinned,
         recalled,
         deletedByAdmin,
         replyToMessageId: item.replyToMessageId || null,
@@ -602,6 +682,24 @@ export class ConversationService {
 
     if (payload.senderBy !== actorUserId) {
       throw new ForbiddenException('senderBy must match userId');
+    }
+
+    if (payload.replyToMessageId) {
+      const replyTarget = await this.messageModel
+        .findOne({
+          _id: payload.replyToMessageId,
+          conversationId,
+          isDeleted: false,
+        })
+        .select('_id')
+        .lean<{ _id: unknown } | null>()
+        .exec();
+
+      if (!replyTarget) {
+        throw new NotFoundException(
+          'Reply target message not found in this conversation',
+        );
+      }
     }
 
     // ✅ Kiểm tra trạng thái chặn của conversation
@@ -973,6 +1071,7 @@ export class ConversationService {
       blockedBy: string | null;
       blockedAt: Date | null;
     },
+    conversationStatus: 'active' | 'dissolved' | 'left_or_removed' = 'active',
   ) {
     const c = membership.conversation;
     const groupNicknameMap = new Map<string, string | null>();
@@ -988,14 +1087,14 @@ export class ConversationService {
     return {
       conversationId: c.conversationId,
       type: c.type,
+      conversationStatus,
       autoDeleteDuration: c.autoDeleteDuration,
       createdAt: c.createdAt,
       myRole: membership.role,
       myJoinedAt: membership.joinedAt,
-      // ✅ Security status của current user
       myIsHidden: membership.isHidden,
       myIsBlocked:
-        blockStatus?.isBlocked &&
+        !!blockStatus?.isBlocked &&
         blockStatus?.blockedUserId === membership.userId,
       myBlockedAt:
         blockStatus?.isBlocked &&
@@ -1023,20 +1122,17 @@ export class ConversationService {
             ownerId: c.groupInfo.ownerId,
           }
         : null,
-      // ✅ Trạng thái CHẶN của cuộc hội thoại (ai chặn ai)
       blockStatus: blockStatus || {
         isBlocked: false,
         blockedUserId: null,
         blockedBy: null,
         blockedAt: null,
       },
-      // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
       canUnblock:
-        blockStatus?.isBlocked && blockStatus?.blockedBy === membership.userId,
-      // ==================== Pin Status ====================
+        !!blockStatus?.isBlocked &&
+        blockStatus?.blockedBy === membership.userId,
       myIsPinned: membership.isPinned,
       myPinnedAt: membership.pinnedAt,
-      // Danh sách participants
       participants: c.participants.map((p) => ({
         userId: p.userId,
         fullName: p.user?.fullName ?? null,
@@ -1046,12 +1142,29 @@ export class ConversationService {
         joinedAt: p.joinedAt,
         lastReadMessageId: p.lastReadMessageId,
         isHidden: p.isHidden,
-        // ✅ Block status của participant khác
         isBlocked: p.isBlocked,
         blockedAt: p.blockedAt,
         blockedBy: p.blockedBy,
       })),
     };
+  }
+
+  private resolveConversationStatus(
+    membership: ConversationParticipant,
+    groupMembership?: GroupMember | null,
+  ): 'active' | 'dissolved' | 'left_or_removed' {
+    if (membership.conversation.groupInfo?.isDissolved) {
+      return 'dissolved';
+    }
+
+    if (
+      membership.conversation.type === ConversationType.GROUP &&
+      (!groupMembership || groupMembership.user.userId !== membership.userId)
+    ) {
+      return 'left_or_removed';
+    }
+
+    return 'active';
   }
 
   // ==================== SECURITY FEATURES ====================
@@ -1099,7 +1212,7 @@ export class ConversationService {
     }
 
     // Hash mật khẩu bằng bcrypt (salt rounds = 10)
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcryptLib.hash(password, 10);
 
     // Cập nhật vào database
     await this.participantRepo.update(
@@ -1155,7 +1268,7 @@ export class ConversationService {
     }
 
     // Verify mật khẩu
-    const isPasswordValid = await bcrypt.compare(
+    const isPasswordValid = await bcryptLib.compare(
       password,
       membership.hidePasswordHash || '',
     );
@@ -1221,7 +1334,7 @@ export class ConversationService {
       return false;
     }
 
-    return bcrypt.compare(password, membership.hidePasswordHash || '');
+    return bcryptLib.compare(password, membership.hidePasswordHash || '');
   }
 
   /**

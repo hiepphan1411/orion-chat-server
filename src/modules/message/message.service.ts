@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -30,6 +31,8 @@ const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name);
+
   constructor(
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
@@ -65,6 +68,31 @@ export class MessageService {
     );
   }
 
+  private async assertReplyTargetInConversation(
+    conversationId: string,
+    replyToMessageId?: string,
+  ) {
+    if (!replyToMessageId) {
+      return;
+    }
+
+    const replyMessage = await this.messageModel
+      .findOne({
+        _id: replyToMessageId,
+        conversationId,
+        isDeleted: false,
+      })
+      .select('_id')
+      .lean<{ _id: unknown } | null>()
+      .exec();
+
+    if (!replyMessage) {
+      throw new NotFoundException(
+        'Reply target message not found in this conversation',
+      );
+    }
+  }
+
   async findAll(): Promise<MessageDocument[]> {
     return this.messageModel.find().exec();
   }
@@ -83,6 +111,11 @@ export class MessageService {
     await this.chatMembershipService.assertConversationMember(
       payload.senderBy,
       payload.conversationId,
+    );
+
+    await this.assertReplyTargetInConversation(
+      payload.conversationId,
+      payload.replyToMessageId,
     );
 
     const normalizedType = this.normalizeMessageType(payload.messageType);
@@ -137,7 +170,9 @@ export class MessageService {
       );
     }
 
-    const fullMessage = await this.messageModel.findById(payload.messageId).exec();
+    const fullMessage = await this.messageModel
+      .findById(payload.messageId)
+      .exec();
     if (!fullMessage) {
       throw new NotFoundException('Message not found');
     }
@@ -508,6 +543,11 @@ export class MessageService {
       payload.conversationId,
     );
 
+    await this.assertReplyTargetInConversation(
+      payload.conversationId,
+      payload.replyToMessageId,
+    );
+
     const metadata = this.chatMediaService.buildMediaMetadata({
       mediaUrl: payload.mediaUrl,
       fileName: payload.fileName,
@@ -553,6 +593,13 @@ export class MessageService {
       payload.conversationId,
     );
 
+    for (const file of payload.files) {
+      await this.assertReplyTargetInConversation(
+        payload.conversationId,
+        file.replyToMessageId,
+      );
+    }
+
     const docs = payload.files.map((file) => {
       const metadata = this.chatMediaService.buildMediaMetadata({
         mediaUrl: file.mediaUrl,
@@ -581,6 +628,195 @@ export class MessageService {
     });
 
     return this.messageModel.insertMany(docs, { ordered: true });
+  }
+
+  async pinMessage(payload: {
+    conversationId: string;
+    messageId: string;
+    userId: string;
+  }) {
+    await this.chatMembershipService.assertConversationMember(
+      payload.userId,
+      payload.conversationId,
+    );
+
+    const message = await this.messageModel.findOne({
+      _id: payload.messageId,
+      conversationId: payload.conversationId,
+      isDeleted: false,
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found in this conversation');
+    }
+
+    if (message.isPinned) {
+      throw new BadRequestException('Message is already pinned');
+    }
+
+    const pinnedCount = await this.messageModel.countDocuments({
+      conversationId: payload.conversationId,
+      isPinned: true,
+      isDeleted: false,
+    });
+
+    if (pinnedCount >= 3) {
+      throw new BadRequestException(
+        'Maximum 3 pinned messages allowed per conversation',
+      );
+    }
+
+    const now = new Date();
+    message.isPinned = true;
+    message.pinnedAt = now;
+    message.pinnedBy = payload.userId;
+    await message.save();
+
+    const pinGateway = this.chatGateway as {
+      emitMessagePinned: (payload: {
+        conversationId: string;
+        messageId: string;
+        pinnedBy: string;
+        pinnedAt: string;
+      }) => void;
+    };
+
+    pinGateway.emitMessagePinned({
+      conversationId: payload.conversationId,
+      messageId: String(message._id),
+      pinnedBy: payload.userId,
+      pinnedAt: now.toISOString(),
+    });
+
+    this.logger.log(
+      `User ${payload.userId} pinned message ${payload.messageId} in conversation ${payload.conversationId}`,
+    );
+
+    return {
+      messageId: String(message._id),
+      conversationId: String(message.conversationId),
+      content: message.content,
+      senderBy: message.senderBy,
+      messageType: message.messageType,
+      createdAt: message.createdAt,
+      isPinned: true,
+      pinnedAt: now,
+      pinnedBy: payload.userId,
+    };
+  }
+
+  async unpinMessage(payload: {
+    conversationId: string;
+    messageId: string;
+    userId: string;
+  }) {
+    await this.chatMembershipService.assertConversationMember(
+      payload.userId,
+      payload.conversationId,
+    );
+
+    const message = await this.messageModel.findOne({
+      _id: payload.messageId,
+      conversationId: payload.conversationId,
+      isDeleted: false,
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found in this conversation');
+    }
+
+    if (!message.isPinned) {
+      throw new BadRequestException('Message is not pinned');
+    }
+
+    message.isPinned = false;
+    message.pinnedAt = null;
+    message.pinnedBy = null;
+    await message.save();
+
+    const unpinGateway = this.chatGateway as {
+      emitMessageUnpinned: (payload: {
+        conversationId: string;
+        messageId: string;
+        unpinnedBy: string;
+        unpinnedAt: string;
+      }) => void;
+    };
+
+    unpinGateway.emitMessageUnpinned({
+      conversationId: payload.conversationId,
+      messageId: String(message._id),
+      unpinnedBy: payload.userId,
+      unpinnedAt: new Date().toISOString(),
+    });
+
+    this.logger.log(
+      `User ${payload.userId} unpinned message ${payload.messageId} in conversation ${payload.conversationId}`,
+    );
+
+    return {
+      messageId: String(message._id),
+      conversationId: String(message.conversationId),
+      isPinned: false,
+      message: 'Message unpinned successfully',
+    };
+  }
+
+  async getPinnedMessages(conversationId: string, userId: string) {
+    await this.chatMembershipService.assertConversationMember(
+      userId,
+      conversationId,
+    );
+
+    const items = await this.messageModel
+      .find({
+        conversationId,
+        isPinned: true,
+        isDeleted: false,
+      })
+      .sort({ pinnedAt: -1, createdAt: -1 })
+      .limit(3)
+      .lean<
+        Array<{
+          _id: unknown;
+          conversationId: string;
+          senderBy: string;
+          content?: string;
+          messageType?: string;
+          createdAt: Date;
+          pinnedAt?: Date | null;
+          pinnedBy?: string | null;
+          replyToMessageId?: string;
+          mediaUrl?: string;
+          fileName?: string;
+          fileSize?: number;
+          mimeType?: string;
+        }>
+      >();
+
+    return {
+      conversationId,
+      items: items.map((item) => ({
+        messageId: String(item._id),
+        conversationId: item.conversationId,
+        senderBy: item.senderBy,
+        content: item.content || '',
+        messageType: item.messageType || MessageType.TEXT,
+        createdAt: item.createdAt,
+        pinnedAt: item.pinnedAt || null,
+        pinnedBy: item.pinnedBy || null,
+        replyToMessageId: item.replyToMessageId || null,
+        isPinned: true,
+        attachment: item.mediaUrl
+          ? {
+              mediaUrl: item.mediaUrl,
+              fileName: item.fileName,
+              fileSize: item.fileSize,
+              mimeType: item.mimeType,
+            }
+          : null,
+      })),
+    };
   }
 
   private normalizeFileMessageType(mimeType?: string): MessageType {

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Controller,
   Get,
@@ -298,6 +299,64 @@ export class ConversationController {
     });
 
     return message;
+  }
+
+  /**
+   * Pin một tin nhắn quan trọng trong conversation
+   * @route POST /conversations/:conversationId/messages/:messageId/pin
+   */
+  @Post(':conversationId/messages/:messageId/pin')
+  async pinMessage(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.pinMessage({
+      conversationId,
+      messageId,
+      userId: user.userId,
+    });
+  }
+
+  /**
+   * Gỡ pin tin nhắn trong conversation
+   * @route DELETE /conversations/:conversationId/messages/:messageId/pin
+   */
+  @Delete(':conversationId/messages/:messageId/pin')
+  async unpinMessage(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.unpinMessage({
+      conversationId,
+      messageId,
+      userId: user.userId,
+    });
+  }
+
+  /**
+   * Lấy danh sách tin nhắn đang được pin
+   * @route GET /conversations/:conversationId/pinned-messages
+   */
+  @Get(':conversationId/pinned-messages')
+  async getPinnedMessages(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.getPinnedMessages(conversationId, user.userId);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -17,6 +17,8 @@ import { ConversationParticipant } from '../conversation/entities/conversation-p
 import { ParticipantRole } from '../conversation/entities/conversation-participant.entity';
 import { User } from '../users/entities/user.entity';
 
+const GROUP_MEMBER_LIMIT = 10;
+
 @Injectable()
 export class GroupsService {
   constructor(
@@ -135,6 +137,16 @@ export class GroupsService {
         addedCount: 0,
         addedAt: new Date().toISOString(),
       };
+    }
+
+    const currentMemberCount = await this.groupMemberRepo.count({
+      where: { group: { conversationId: groupId } },
+    });
+
+    if (currentMemberCount + idsToAdd.length > GROUP_MEMBER_LIMIT) {
+      throw new BadRequestException(
+        `Group member limit reached (${GROUP_MEMBER_LIMIT})`,
+      );
     }
 
     await this.groupMemberRepo.manager.transaction(async (manager) => {
