@@ -390,48 +390,48 @@ export class AuthService {
     oldPlatform: string,
     newPlatform: string,
   ): void {
+    console.log(
+      `[emitSessionConflict] Called with userId=${userId}, oldPlatform=${oldPlatform}, newPlatform=${newPlatform}`,
+    );
     try {
+      console.log(
+        `[emitSessionConflict] Checking gateway: presenceGateway=${!!this.presenceGateway}, server=${!!this.presenceGateway?.server}`,
+      );
       if (!this.presenceGateway || !this.presenceGateway.server) {
+        console.log(
+          `[emitSessionConflict] WARN: Presence gateway not available!`,
+        );
         this.logger.warn(
           'Presence gateway not available for emitting session conflict',
         );
         return;
       }
 
-      // Emit to ALL devices of same platform that was just replaced
-      // This ensures ALL old devices of same platform get notified, not just one
+      const roomName = `user:${userId}:${oldPlatform}`;
+      const eventData = {
+        message: `Tài khoản của bạn được đăng nhập từ thiết bị ${newPlatform} khác. Phiên hiện tại sẽ bị đóng.`,
+        oldPlatform,
+        newPlatform,
+        timestamp: new Date().toISOString(),
+      };
+
+      console.log(
+        `[emitSessionConflict] Emitting to room ${roomName}: ${JSON.stringify(eventData)}`,
+      );
+
+      // IMPORTANT: Only emit to the OLD platform's room
+      // This prevents the NEW device from receiving its own conflict event (self-conflict)
       this.presenceGateway.server
-        .to(`user:${userId}:${oldPlatform}`)
-        .emit('session:conflict', {
-          message: `Tài khoản của bạn được đăng nhập từ ${newPlatform} khác. Phiên hiện tại sẽ bị đóng.`,
-          oldPlatform,
-          newPlatform,
-          timestamp: new Date().toISOString(),
-        });
+        .to(roomName)
+        .emit('session:conflict', eventData);
 
-      // Fallback: emit to the user's general room as well in case platform room
-      // membership doesn't match (e.g., platform label mismatch on client)
-      try {
-        this.presenceGateway.server
-          .to(`user:${userId}`)
-          .emit('session:conflict', {
-            message: `Tài khoản của bạn được đăng nhập từ ${newPlatform} khác. Phiên hiện tại sẽ bị đóng.`,
-            oldPlatform,
-            newPlatform,
-            timestamp: new Date().toISOString(),
-          });
-
-        this.logger.log(
-          `[Session Conflict] Emitted fallback session:conflict to all devices of user ${userId}`,
-        );
-      } catch (err) {
-        this.logger.warn('[Session Conflict] Fallback emit failed:', err);
-      }
+      console.log(`[emitSessionConflict] Event emitted successfully`);
 
       this.logger.log(
-        `[Session Conflict] Notified ALL ${oldPlatform} devices of user ${userId} about login from ${newPlatform}`,
+        `[Session Conflict] Notified ALL ${oldPlatform} devices of user ${userId} about new login from ${newPlatform}`,
       );
     } catch (error) {
+      console.log(`[emitSessionConflict] ERROR: ${JSON.stringify(error)}`);
       this.logger.error('Error emitting session conflict:', error);
     }
   }
@@ -484,21 +484,40 @@ export class AuthService {
       // quản lý phiên đăng nhập
       const now = new Date();
 
-      // Check if there's an existing session and notify old device to logout
-      if (platform === 'mobile' && user.mobileSessionToken) {
-        // Notify old mobile device - will logout automatically
-        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
-        // Add delay to ensure old socket receives event before token is overwritten
-        // Need 500ms for client to establish socket connection
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } else if (platform === 'web' && user.webSessionToken) {
-        // Notify old web device - will logout automatically
-        this.emitSessionConflict(user.userId, 'web', 'web');
-        // Add delay to ensure old socket receives event before token is overwritten
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
+      // Check if there's an existing session on ANY platform and notify old devices to logout
+      // IMPORTANT: When user logs in:
+      // - Notify old same-platform sessions (e.g., old mobile when new mobile login)
+      // - Notify old other-platform sessions (e.g., web when new mobile login)
 
-      // If allowed, proceed with login
+      console.log(
+        `[Login DEBUG] User object before token check:`,
+        JSON.stringify({
+          userId: user.userId,
+          mobileSessionToken: !!user.mobileSessionToken,
+          webSessionToken: !!user.webSessionToken,
+          platform,
+        }),
+      );
+
+      const oldSessionExists =
+        platform === 'mobile' ? user.mobileSessionToken : user.webSessionToken;
+
+      const otherPlatform = platform === 'mobile' ? 'web' : 'mobile';
+      const otherSessionExists =
+        platform === 'mobile' ? user.webSessionToken : user.mobileSessionToken;
+
+      this.logger.log(
+        `[Login] User ${user.userId} (${platform}): oldSessionExists=${!!oldSessionExists}, otherSessionExists (${otherPlatform})=${!!otherSessionExists}`,
+      );
+
+      console.log(
+        `[Login DEBUG] About to check presenceGateway:`,
+        `gateway=${!!this.presenceGateway}, server=${!!this.presenceGateway?.server}`,
+      );
+
+      // IMPORTANT: Update token BEFORE emitting conflict
+      // This ensures token is already updated in DB when old devices receive conflict event
+      // Otherwise, old device logout and delete token, but it's still the old token!
       if (platform === 'mobile') {
         user.mobileSessionToken = token;
         user.mobileSessionStartedAt = now;
@@ -515,8 +534,53 @@ export class AuthService {
         user.currentSessionToken = token;
       }
 
+      // Save to database FIRST before emitting events
+      await this.userRepo.save(user);
+
+      // NOW emit conflict events for BOTH same-platform and other-platform old sessions
+      // Notify old same-platform sessions
+      if (oldSessionExists) {
+        this.logger.log(
+          `[Login] Found existing ${platform} session for user ${user.userId}, notifying old ${platform} devices`,
+        );
+        console.log(
+          `[Emit DEBUG] About to emit for same platform - userId: ${user.userId}, platform: ${platform}`,
+        );
+        this.emitSessionConflict(user.userId, platform, platform);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } else {
+        console.log(
+          `[Emit DEBUG] No old same-platform session found, skipping emit`,
+        );
+      }
+
+      // Also notify other platform if it has active session
+      if (otherSessionExists) {
+        this.logger.log(
+          `[Login] Found existing ${otherPlatform} session for user ${user.userId}, notifying ${otherPlatform} to logout`,
+        );
+        console.log(
+          `[Emit DEBUG] About to emit for other platform - userId: ${user.userId}, platform: ${otherPlatform}`,
+        );
+        this.emitSessionConflict(user.userId, otherPlatform, platform);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } else {
+        console.log(
+          `[Emit DEBUG] No other-platform session found, skipping emit`,
+        );
+      }
+
+      if (!oldSessionExists && !otherSessionExists) {
+        this.logger.log(
+          `[Login] No existing sessions for user ${user.userId}, first login on ${platform}`,
+        );
+        console.log(`[Emit DEBUG] First login scenario - no emit needed`);
+      }
+
+      // Update last login info
       user.lastLoginAt = now;
       user.lastActivityAt = Date.now();
+      // Note: Already saved after token update, just update the final fields
       await this.userRepo.save(user);
 
       try {
@@ -591,18 +655,16 @@ export class AuthService {
       }
 
       // xóa session theo nền tảng
+      // IMPORTANT: Do NOT emit conflict events during logout
+      // Logout is already handled client-side, emitting here would cause duplicate alerts
       if (platform === 'mobile') {
         user.mobileSessionToken = null as unknown as string;
         user.mobileSessionStartedAt = null as unknown as Date;
         user.mobileLastActivityAt = null as unknown as number;
-        // Emit session conflict to notify other mobile devices
-        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
       } else if (platform === 'web') {
         user.webSessionToken = null as unknown as string;
         user.webSessionStartedAt = null as unknown as Date;
         user.webLastActivityAt = null as unknown as number;
-        // Emit session conflict to notify other web devices
-        this.emitSessionConflict(user.userId, 'web', 'web');
       } else {
         // Default: xóa tất cả session
         user.webSessionToken = null as unknown as string;
@@ -610,9 +672,6 @@ export class AuthService {
         user.webSessionStartedAt = null as unknown as Date;
         user.mobileSessionStartedAt = null as unknown as Date;
         user.currentSessionToken = null as unknown as string;
-        // Emit to both platforms
-        this.emitSessionConflict(user.userId, 'web', 'web');
-        this.emitSessionConflict(user.userId, 'mobile', 'mobile');
       }
 
       await this.userRepo.save(user);
