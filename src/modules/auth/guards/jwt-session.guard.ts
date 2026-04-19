@@ -13,6 +13,7 @@ import type { Request } from 'express';
 interface TokenPayload {
   phoneNumber: string;
   userId?: string;
+  deviceType?: string;
   iat: number;
   exp: number;
 }
@@ -37,8 +38,8 @@ export class JwtSessionGuard implements CanActivate {
     }
 
     try {
-      // Trích xuất số điện thoại từ token
-      const phoneNumber = this.extractPhoneFromToken(token);
+      const tokenPayload = this.extractTokenPayload(token);
+      const phoneNumber = tokenPayload.phoneNumber;
 
       // Tìm user
       const user = await this.userRepo.findOne({
@@ -54,11 +55,24 @@ export class JwtSessionGuard implements CanActivate {
         throw new UnauthorizedException('Tài khoản đã bị vô hiệu hóa');
       }
 
-      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB
-      // Platform được lấy từ X-Platform header (FE gửi)
-      const platform = (request.headers['x-platform'] as string) || 'web';
+      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB.
+      // Ưu tiên x-platform header, fallback theo deviceType trong JWT để tránh
+      // trường hợp client quên gửi header và bị mặc định sai sang web.
+      const headerPlatform = this.normalizePlatform(
+        request.headers['x-platform'],
+      );
+      const tokenPlatform = this.normalizePlatform(tokenPayload.deviceType);
       const tokenMatchesWeb = user.webSessionToken === token;
       const tokenMatchesMobile = user.mobileSessionToken === token;
+
+      const platform =
+        headerPlatform ||
+        tokenPlatform ||
+        (tokenMatchesMobile && !tokenMatchesWeb
+          ? 'mobile'
+          : tokenMatchesWeb && !tokenMatchesMobile
+            ? 'web'
+            : 'web');
 
       // this.logger.debug('[Session Check] Platform from header: ' + platform);
       // this.logger.debug(
@@ -111,7 +125,7 @@ export class JwtSessionGuard implements CanActivate {
     return type === 'Bearer' ? token : undefined;
   }
 
-  private extractPhoneFromToken(token: string): string {
+  private extractTokenPayload(token: string): TokenPayload {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) {
@@ -126,10 +140,23 @@ export class JwtSessionGuard implements CanActivate {
         throw new Error('phoneNumber not found in token');
       }
 
-      return payload.phoneNumber;
+      return payload;
     } catch (error) {
       this.logger.error('Error extracting phone from token:', error);
       throw new UnauthorizedException('Token không hợp lệ');
     }
+  }
+
+  private normalizePlatform(value: string | string[] | undefined):
+    | 'web'
+    | 'mobile'
+    | null {
+    if (!value) return null;
+    const raw = Array.isArray(value) ? value[0] : value;
+    const normalized = raw?.toLowerCase();
+    if (normalized === 'web' || normalized === 'mobile') {
+      return normalized;
+    }
+    return null;
   }
 }
