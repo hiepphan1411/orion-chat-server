@@ -6,9 +6,9 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  console.log('🚀 [bootstrap] Starting bootstrap...');
+  console.log('[bootstrap] Starting bootstrap...');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  console.log('✅ [bootstrap] NestFactory.create completed');
+  console.log('[bootstrap] NestFactory.create completed');
 
   // Danh sách allowed origins - KHÔNG có trailing slash
   const allowedOrigins = [
@@ -43,7 +43,7 @@ async function bootstrap() {
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
-      whitelist: true,
+      whitelist: false,
     }),
   );
 
