@@ -436,16 +436,8 @@ export class GroupsService {
         }
       | undefined;
 
-    if (this.isOwnerRole(actor.role) && remainingMembers.length > 0) {
-      if (!newAdminUserId) {
-        throw new BadRequestException('ADMIN_TRANSFER_REQUIRED');
-      }
-    }
-
     const needsTransfer =
-      (actor.role === GroupMemberRole.OWNER ||
-        actor.role === GroupMemberRole.ADMIN) &&
-      remainingMembers.length > 0;
+      this.isOwnerRole(actor.role) && remainingMembers.length > 0;
 
     if (needsTransfer) {
       const successor = this.pickSuccessorAdmin(
