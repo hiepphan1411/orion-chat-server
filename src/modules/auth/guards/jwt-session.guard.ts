@@ -147,10 +147,9 @@ export class JwtSessionGuard implements CanActivate {
     }
   }
 
-  private normalizePlatform(value: string | string[] | undefined):
-    | 'web'
-    | 'mobile'
-    | null {
+  private normalizePlatform(
+    value: string | string[] | undefined,
+  ): 'web' | 'mobile' | null {
     if (!value) return null;
     const raw = Array.isArray(value) ? value[0] : value;
     const normalized = raw?.toLowerCase();

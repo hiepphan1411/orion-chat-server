@@ -64,14 +64,14 @@ export class JwtAuthGuard implements CanActivate {
       const tokenMatchesWeb = user.webSessionToken === token;
       const tokenMatchesMobile = user.mobileSessionToken === token;
 
-      this.logger.log(
-        '[JWT Guard] Platform: ' +
-          platform +
-          ' | Web match: ' +
-          tokenMatchesWeb +
-          ' | Mobile match: ' +
-          tokenMatchesMobile,
-      );
+      // this.logger.log(
+      //   '[JWT Guard] Platform: ' +
+      //     platform +
+      //     ' | Web match: ' +
+      //     tokenMatchesWeb +
+      //     ' | Mobile match: ' +
+      //     tokenMatchesMobile,
+      // );
 
       // Kiểm tra token phải khớp với session trong DB
       if (!tokenMatchesWeb && !tokenMatchesMobile) {

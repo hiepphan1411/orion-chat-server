@@ -511,9 +511,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.conversationId,
       );
 
-      this.logger.log(
-        `[ChatGateway] Joining conversation: ${data.conversationId}`,
-      );
+      // this.logger.log(
+      //   `[ChatGateway] Joining conversation: ${data.conversationId}`,
+      // );
       void client.join(`conversation:${data.conversationId}`);
       void client.join(data.conversationId);
 

@@ -1,3 +1,4 @@
+/*eslint-disable */
 import {
   Injectable,
   NotFoundException,
@@ -66,7 +67,10 @@ export class UserSettingsService {
     updateUserSettingsDto: UpdateUserSettingsDto,
   ): Promise<UserSettings> {
     this.logger.log(`[UserSettings] Updating settings for userId: ${userId}`);
-    this.logger.debug(`[UserSettings] Update data:`, JSON.stringify(updateUserSettingsDto));
+    this.logger.debug(
+      `[UserSettings] Update data:`,
+      JSON.stringify(updateUserSettingsDto),
+    );
 
     const settings = await this.findByUserId(userId);
     this.logger.log(`[UserSettings] Found settings id: ${settings.id}`);
@@ -89,8 +93,13 @@ export class UserSettingsService {
     }
 
     const savedSettings = await this.settingsRepository.save(settings);
-    this.logger.log(`[UserSettings] Settings saved successfully for userId: ${userId}`);
-    this.logger.debug(`[UserSettings] Saved data:`, JSON.stringify(savedSettings));
+    this.logger.log(
+      `[UserSettings] Settings saved successfully for userId: ${userId}`,
+    );
+    this.logger.debug(
+      `[UserSettings] Saved data:`,
+      JSON.stringify(savedSettings),
+    );
 
     return savedSettings;
   }

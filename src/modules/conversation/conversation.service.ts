@@ -1,3 +1,4 @@
+/* eslint-disable*/
 import {
   Injectable,
   NotFoundException,
@@ -79,6 +80,9 @@ type ConversationMessagesResult = {
     id: string;
     conversationId: string;
     senderId: string;
+    senderBy: string; // For mobile comparison
+    senderName?: string;
+    senderAvatar?: string;
     content: string;
     reactions: Array<{
       userId: string;
@@ -94,6 +98,7 @@ type ConversationMessagesResult = {
     createdAt: Date | string;
     isPinned: boolean;
     recalled: boolean;
+    isRevoked: boolean; // ← Changed from recalled to isRevoked for mobile
     deletedByAdmin: boolean;
     replyToMessageId: string | null;
     replyToMessagePreview?: {
@@ -448,6 +453,14 @@ export class ConversationService {
       );
     }
 
+    console.log('[createGroupConversation] Creating group:', {
+      groupName,
+      creatorId,
+      selectedMembers: normalizedMemberIds.length,
+      allParticipantsCount: allParticipantIds.length,
+      normalizedMemberIds,
+    });
+
     for (const userId of allParticipantIds) {
       this.validateUUID(userId, 'memberId');
     }
@@ -606,6 +619,27 @@ export class ConversationService {
     const nowMs = Date.now();
     const windowMs = 24 * 60 * 60 * 1000;
 
+    // DEBUG: Log media messages
+    const mediaMessages = items.filter((item) =>
+      ['FILE', 'IMAGE', 'VIDEO'].includes(
+        String(item.messageType || 'TEXT').toUpperCase(),
+      ),
+    );
+
+    // if (mediaMessages.length > 0) {
+    //   console.log('[getMessages] Found media messages:', {
+    //     count: mediaMessages.length,
+    //     conversationId,
+    //     messages: mediaMessages.map((msg) => ({
+    //       messageId: String(msg._id),
+    //       messageType: String(msg.messageType || 'TEXT').toUpperCase(),
+    //       fileName: msg.fileName,
+    //       mediaUrl: msg.mediaUrl ? 'Has URL' : 'No URL',
+    //       fileSize: msg.fileSize,
+    //     })),
+    //   });
+    // }
+
     const mappedItems = items.map((item) => {
       const createdAtDate = this.toDate(item.createdAt) || new Date(0);
       const within24Hours = nowMs - createdAtDate.getTime() <= windowMs;
@@ -613,11 +647,16 @@ export class ConversationService {
       const isOwnMessage = senderId === userId;
       const recalled = !!item.isRevoked;
       const deletedByAdmin = !!item.deletedByAdmin;
+      const messageId = String(item._id || '');
 
       return {
-        id: String(item._id || ''),
+        _id: messageId, // MongoDB ID for mobile
+        id: messageId, // Also provide as id for consistency
         conversationId,
         senderId,
+        senderBy: senderId, // Mobile expects senderBy for comparison
+        senderName: item.senderName || 'Unknown',
+        senderAvatar: item.senderAvatar || undefined,
         content: String(item.content || ''),
         reactions: Array.isArray(item.reactions)
           ? item.reactions.map((reaction) => ({
@@ -626,6 +665,12 @@ export class ConversationService {
               reactedAt: this.toDate(reaction.reactedAt) || reaction.reactedAt,
             }))
           : [],
+        messageType: String(item.messageType || 'TEXT').toUpperCase(), // Normalize to UPPERCASE for consistency with mobile types
+        mediaUrl: item.mediaUrl || undefined, // Direct mediaUrl field for mobile
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        mimeType: item.mimeType,
+        isRevoked: recalled, // ← Mobile expects isRevoked, not recalled
         attachments: item.mediaUrl
           ? [
               {
@@ -674,7 +719,7 @@ export class ConversationService {
     payload: CreateConversationMessagePayload,
   ): Promise<MessageDocument> {
     // ✅ Verify user là member của conversation (throws nếu không phải member)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     const _membership = await this.requireMembership(
       conversationId,
       actorUserId,
@@ -772,6 +817,24 @@ export class ConversationService {
     });
 
     if (membership) {
+      // console.log('[requireMembership] Loaded conversation:', {
+      //   conversationId,
+      //   participantsCount: membership.conversation.participants?.length,
+      //   conversationType: membership.conversation.type,
+      // });
+
+      // Re-fetch participants to ensure we get ALL of them
+      // TypeORM relations may not load complete arrays reliably
+      if (membership.conversation.type === 'GROUP') {
+        const allParticipants = await this.participantRepo.find({
+          where: { conversationId },
+          relations: ['user'],
+        });
+        membership.conversation.participants = allParticipants;
+        // console.log('[requireMembership] Re-fetched all participants:', {
+        //   participantsCount: allParticipants.length,
+        // });
+      }
       if (membership.conversation.groupInfo?.isDissolved) {
         throw new ForbiddenException('GROUP_DISSOLVED');
       }

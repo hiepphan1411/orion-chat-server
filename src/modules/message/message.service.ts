@@ -164,6 +164,13 @@ export class MessageService {
       String(message.conversationId),
     );
 
+    console.log('[revokeMessageForEveryone] Checking sender:', {
+      messageId: payload.messageId,
+      messageSenderBy: String(message.senderBy),
+      revokedBy: payload.revokedBy,
+      match: String(message.senderBy) === payload.revokedBy,
+    });
+
     if (String(message.senderBy) !== payload.revokedBy) {
       throw new ForbiddenException(
         'Only sender can revoke message for everyone',
@@ -193,6 +200,13 @@ export class MessageService {
         },
       );
     }
+
+    console.log('[revokeMessageForEveryone] Message revoked successfully:', {
+      messageId: String(message._id),
+      conversationId: String(message.conversationId),
+      revokedBy: payload.revokedBy,
+      revokedAt: revokedAt.toISOString(),
+    });
 
     return {
       messageId: String(message._id),
@@ -547,6 +561,14 @@ export class MessageService {
       payload.conversationId,
       payload.replyToMessageId,
     );
+    // DEBUG: Validate mediaUrl
+    if (!payload.mediaUrl) {
+      console.error('[sendFileMessage] mediaUrl is required!', {
+        fileName: payload.fileName,
+        fileSize: payload.fileSize,
+      });
+      throw new BadRequestException('mediaUrl is required');
+    }
 
     const metadata = this.chatMediaService.buildMediaMetadata({
       mediaUrl: payload.mediaUrl,
@@ -555,6 +577,15 @@ export class MessageService {
       mimeType: String(payload.mimeType || 'application/octet-stream'),
       preferredMessageType: payload.preferredMessageType,
     });
+
+    // console.log('[sendFileMessage] Creating file message:', {
+    //   fileName: metadata.fileName,
+    //   mediaUrl: metadata.mediaUrl,
+    //   messageType: metadata.messageType,
+    //   fileSize: metadata.fileSize,
+    //   conversationId: payload.conversationId,
+    //   clientMessageId: payload.clientMessageId,
+    // });
 
     return this.messageModel.create({
       conversationId: payload.conversationId,
@@ -599,8 +630,25 @@ export class MessageService {
         file.replyToMessageId,
       );
     }
+    console.log('[sendMediaBatch] Processing batch:', {
+      conversationId: payload.conversationId,
+      fileCount: payload.files.length,
+      files: payload.files.map((f) => ({
+        fileName: f.fileName,
+        mediaUrl: f.mediaUrl,
+        fileSize: f.fileSize,
+      })),
+    });
 
     const docs = payload.files.map((file) => {
+      // Validate mediaUrl
+      if (!file.mediaUrl) {
+        console.error('[sendMediaBatch] ❌ Missing mediaUrl for file:', {
+          fileName: file.fileName,
+        });
+        throw new BadRequestException(`mediaUrl required for ${file.fileName}`);
+      }
+
       const metadata = this.chatMediaService.buildMediaMetadata({
         mediaUrl: file.mediaUrl,
         fileName: file.fileName,
