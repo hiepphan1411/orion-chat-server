@@ -54,6 +54,10 @@ export class SendMessageSocketDto {
   fileName?: string;
 
   @IsOptional()
+  @IsString()
+  fileType?: string; // MIME type like 'image/png', 'application/pdf', etc.
+
+  @IsOptional()
   fileSize?: number;
 
   @IsOptional()

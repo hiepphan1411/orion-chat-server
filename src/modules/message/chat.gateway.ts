@@ -381,6 +381,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     clientMessageId?: string;
     replyToMessageId?: string;
     messageStatus?: string;
+    fileName?: string;
+    mediaUrl?: string;
+    mimeType?: string;
     callData?: {
       callType?: 'audio' | 'video';
       callStatus?: 'completed' | 'missed' | 'declined';
@@ -405,6 +408,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           clientMessageId: payload.clientMessageId,
           replyToMessageId: payload.replyToMessageId,
           messageStatus: payload.messageStatus,
+          fileName: payload.fileName,
+          mediaUrl: payload.mediaUrl,
+          mimeType: payload.mimeType,
           callData: payload.callData || null,
         },
       });
@@ -621,6 +627,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         senderAvatar: senderAvatar,
         content: data.content,
         messageType: data.type,
+        fileName: data.fileName,
+        mediaUrl: data.mediaUrl,
+        mimeType: data.fileType, // Use fileType from client as mimeType
         createdAt: message.createdAt,
         clientMessageId: data.clientMessageId,
         replyToMessageId: data.replyToMessageId,
