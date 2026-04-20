@@ -868,6 +868,25 @@ export class ConversationController {
   }
 
   /**
+   * Xóa cuộc hội thoại cho người dùng hiện tại (chỉ áp dụng PRIVATE).
+   * @route DELETE /conversations/:conversationId
+   */
+  @Delete(':conversationId')
+  async deleteConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.conversationService.deleteConversationForUser(
+      conversationId,
+      user.userId,
+    );
+  }
+
+  /**
    * Leave a group conversation from the conversation namespace.
    * This endpoint exists for FE compatibility with /conversations/:id/leave.
    */

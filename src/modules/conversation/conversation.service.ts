@@ -302,6 +302,38 @@ export class ConversationService {
     );
   }
 
+  async deleteConversationForUser(conversationId: string, userId: string) {
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+      relations: ['conversation'],
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (membership.conversation.type !== ConversationType.PRIVATE) {
+      throw new BadRequestException(
+        'Only private conversations can be deleted via this endpoint',
+      );
+    }
+
+    await this.participantRepo.delete({ conversationId, userId });
+
+    const remainingParticipants = await this.participantRepo.count({
+      where: { conversationId },
+    });
+
+    if (remainingParticipants === 0) {
+      await this.conversationRepo.delete({ conversationId });
+    }
+
+    return {
+      success: true,
+      conversationId,
+    };
+  }
+
   /**
    * Lấy hoặc tạo PRIVATE conversation giữa current user và recipient
    * @param currentUserId ID của user hiện tại
