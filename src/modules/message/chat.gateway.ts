@@ -402,7 +402,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
-  // ✅ FIX: Thêm mediaUrl, fileName, fileSize, mimeType vào type signature
+  /**
+   * Emit khi tạo group mới - gửi tới tất cả thành viên để họ refresh conversations
+   */
+  emitGroupCreated(payload: {
+    groupId: string;
+    groupName: string;
+    createdBy: string;
+    memberIds: string[];
+  }) {
+    // Gửi tới tất cả thành viên trong group
+    for (const memberId of payload.memberIds) {
+      this.server.to(`user:${memberId}`).emit('group:created', {
+        groupId: payload.groupId,
+        groupName: payload.groupName,
+        createdBy: payload.createdBy,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
   emitNewMessage(payload: {
     conversationId: string;
     messageId: string;
@@ -702,7 +721,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Use senderId as fallback senderName
       }
 
-      // ✅ FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType vào emitNewMessage
+      // FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType vào emitNewMessage
       // để bên B nhận được socket event với đủ thông tin preview media ngay lập tức
       this.emitNewMessage({
         conversationId: data.conversationId,
