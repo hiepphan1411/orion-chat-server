@@ -111,7 +111,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
       }
     } catch (error) {
-      this.logger.warn(`[ChatGateway] Failed to load profile for ${userId}`, error);
+      this.logger.warn(
+        `[ChatGateway] Failed to load profile for ${userId}`,
+        error,
+      );
     }
 
     return {
@@ -398,6 +401,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     createdAt: any;
     clientMessageId?: string;
     replyToMessageId?: string;
+    replyToMessagePreview?: {
+      messageId: string;
+      content: string;
+      senderName: string;
+      snippet: string;
+      createdAt: Date | string | null;
+    };
     messageStatus?: string;
     callData?: {
       callType?: 'audio' | 'video';
@@ -422,6 +432,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           createdAt: payload.createdAt,
           clientMessageId: payload.clientMessageId,
           replyToMessageId: payload.replyToMessageId,
+          replyToMessagePreview: payload.replyToMessagePreview,
           messageStatus: payload.messageStatus,
           callData: payload.callData || null,
         },
@@ -575,6 +586,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.conversationId,
       );
 
+      let replyToMessagePreview:
+        | {
+            messageId: string;
+            content: string;
+            senderName: string;
+            snippet: string;
+            createdAt: Date | string | null;
+          }
+        | undefined;
+
       if (data.replyToMessageId) {
         const replyMessage = await this.messageModel
           .findOne({
@@ -582,8 +603,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             conversationId: data.conversationId,
             isDeleted: false,
           })
-          .select('_id')
-          .lean<{ _id: unknown } | null>()
+          .select('_id content senderBy createdAt')
+          .lean<
+            | {
+                _id: unknown;
+                content?: string;
+                senderBy: string;
+                createdAt?: Date | string;
+              }
+            | null
+          >()
           .exec();
 
         if (!replyMessage) {
@@ -594,6 +623,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             false,
           );
         }
+
+        let replySenderName = 'Unknown';
+        try {
+          const replySender = await this.usersService.getProfile(
+            replyMessage.senderBy,
+          );
+          if (replySender?.data?.fullName) {
+            replySenderName = replySender.data.fullName;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `[ChatGateway] Could not fetch reply sender info for ${replyMessage.senderBy}`,
+            error,
+          );
+        }
+
+        const replyContent = String(replyMessage.content || '');
+        replyToMessagePreview = {
+          messageId: String(replyMessage._id),
+          content: replyContent,
+          senderName: replySenderName,
+          snippet: replyContent.slice(0, 100),
+          createdAt: replyMessage.createdAt || null,
+        };
       }
 
       // Create message in database
@@ -643,6 +696,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         createdAt: message.createdAt,
         clientMessageId: data.clientMessageId,
         replyToMessageId: data.replyToMessageId,
+        replyToMessagePreview,
         messageStatus: 'SENT',
         callData: data.callData || null,
       });
