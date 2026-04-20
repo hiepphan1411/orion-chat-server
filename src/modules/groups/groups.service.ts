@@ -18,6 +18,7 @@ import { ParticipantRole } from '../conversation/entities/conversation-participa
 import { User } from '../users/entities/user.entity';
 
 const GROUP_MEMBER_LIMIT = 10;
+const CO_ADMIN_LIMIT = 5;
 
 @Injectable()
 export class GroupsService {
@@ -41,6 +42,10 @@ export class GroupsService {
       role === GroupMemberRole.ADMIN ||
       role === GroupMemberRole.CO_ADMIN
     );
+  }
+
+  private isOwnerRole(role: GroupMemberRole): boolean {
+    return role === GroupMemberRole.OWNER;
   }
 
   private mapRoleForClient(
@@ -87,6 +92,7 @@ export class GroupsService {
       items: members.map((m) => ({
         userId: m.user.userId,
         fullName: m.user.fullName,
+        phoneNumber: m.user.phoneNumber,
         avatarUrl: m.user.avatarUrl,
         role: this.mapRoleForClient(m.role),
         joinedAt: m.joinedAt,
@@ -187,8 +193,8 @@ export class GroupsService {
   ) {
     const actor = await this.requireGroupMembership(groupId, actorUserId);
 
-    if (!this.isAdminRole(actor.role)) {
-      throw new ForbiddenException('FORBIDDEN');
+    if (!this.isOwnerRole(actor.role)) {
+      throw new ForbiddenException('ONLY_OWNER_CAN_TRANSFER_ADMIN');
     }
 
     if (actorUserId === targetUserId) {
@@ -245,6 +251,136 @@ export class GroupsService {
     };
   }
 
+  async updateMemberRole(
+    groupId: string,
+    actorUserId: string,
+    targetUserId: string,
+    role: 'co-admin' | 'member',
+  ) {
+    const actor = await this.requireGroupMembership(groupId, actorUserId);
+
+    if (!this.isOwnerRole(actor.role)) {
+      throw new ForbiddenException('ONLY_OWNER_CAN_ASSIGN_ROLE');
+    }
+
+    if (actorUserId === targetUserId) {
+      throw new BadRequestException('CANNOT_UPDATE_SELF_ROLE');
+    }
+
+    const target = await this.groupMemberRepo.findOne({
+      where: {
+        group: { conversationId: groupId },
+        user: { userId: targetUserId },
+      },
+      relations: ['group', 'user'],
+    });
+
+    if (!target) {
+      throw new NotFoundException('MEMBER_NOT_FOUND');
+    }
+
+    if (target.role === GroupMemberRole.OWNER) {
+      throw new BadRequestException('CANNOT_UPDATE_OWNER_ROLE');
+    }
+
+    const nextRole =
+      role === 'co-admin' ? GroupMemberRole.CO_ADMIN : GroupMemberRole.MEMBER;
+
+    if (
+      nextRole === GroupMemberRole.CO_ADMIN &&
+      target.role !== GroupMemberRole.CO_ADMIN
+    ) {
+      const coAdminCount = await this.groupMemberRepo.count({
+        where: {
+          group: { conversationId: groupId },
+          role: GroupMemberRole.CO_ADMIN,
+        },
+      });
+
+      if (coAdminCount >= CO_ADMIN_LIMIT) {
+        throw new BadRequestException('CO_ADMIN_LIMIT_EXCEEDED');
+      }
+    }
+
+    await this.groupMemberRepo.manager.transaction(async (manager) => {
+      await manager.update(GroupMember, { id: target.id }, { role: nextRole });
+
+      await manager.update(
+        ConversationParticipant,
+        { conversationId: groupId, userId: targetUserId },
+        {
+          role:
+            nextRole === GroupMemberRole.MEMBER
+              ? ParticipantRole.MEMBER
+              : ParticipantRole.ADMIN,
+        },
+      );
+    });
+
+    return {
+      groupId,
+      targetUserId,
+      role: this.mapRoleForClient(nextRole),
+      updatedBy: actorUserId,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async removeMember(
+    groupId: string,
+    actorUserId: string,
+    targetUserId: string,
+  ) {
+    const actor = await this.requireGroupMembership(groupId, actorUserId);
+
+    if (!this.isAdminRole(actor.role)) {
+      throw new ForbiddenException('FORBIDDEN');
+    }
+
+    if (actorUserId === targetUserId) {
+      throw new BadRequestException('CANNOT_REMOVE_SELF');
+    }
+
+    const target = await this.groupMemberRepo.findOne({
+      where: {
+        group: { conversationId: groupId },
+        user: { userId: targetUserId },
+      },
+      relations: ['group', 'user'],
+    });
+
+    if (!target) {
+      throw new NotFoundException('MEMBER_NOT_FOUND');
+    }
+
+    if (target.role === GroupMemberRole.OWNER) {
+      throw new ForbiddenException('CANNOT_REMOVE_OWNER');
+    }
+
+    if (
+      target.role === GroupMemberRole.CO_ADMIN &&
+      actor.role !== GroupMemberRole.OWNER
+    ) {
+      throw new ForbiddenException('ONLY_OWNER_CAN_REMOVE_CO_ADMIN');
+    }
+
+    await this.groupMemberRepo.manager.transaction(async (manager) => {
+      await manager.delete(GroupMember, { id: target.id });
+
+      await manager.delete(ConversationParticipant, {
+        conversationId: groupId,
+        userId: targetUserId,
+      });
+    });
+
+    return {
+      groupId,
+      removedUserId: targetUserId,
+      removedBy: actorUserId,
+      removedAt: new Date().toISOString(),
+    };
+  }
+
   async leaveGroup(
     groupId: string,
     actorUserId: string,
@@ -261,7 +397,7 @@ export class GroupsService {
       (m) => m.user.userId !== actorUserId,
     );
 
-    if (this.isAdminRole(actor.role) && remainingMembers.length > 0) {
+    if (this.isOwnerRole(actor.role) && remainingMembers.length > 0) {
       if (!newAdminUserId) {
         throw new BadRequestException('ADMIN_TRANSFER_REQUIRED');
       }
@@ -325,24 +461,19 @@ export class GroupsService {
   async dissolveGroup(groupId: string, actorUserId: string) {
     const actor = await this.requireGroupMembership(groupId, actorUserId);
 
-    if (!this.isAdminRole(actor.role)) {
-      throw new ForbiddenException('FORBIDDEN');
+    if (!this.isOwnerRole(actor.role)) {
+      throw new ForbiddenException('ONLY_OWNER_CAN_DISSOLVE_GROUP');
     }
 
-    await this.groupRepo.update(
-      { conversationId: groupId },
-      {
-        isDissolved: true,
-        dissolvedAt: new Date(),
-        dissolvedBy: actorUserId,
-      },
-    );
+    await this.groupRepo.manager.transaction(async (manager) => {
+      await manager.delete(Conversation, { conversationId: groupId });
+    });
 
     return {
       groupId,
       dissolvedBy: actorUserId,
       dissolvedAt: new Date().toISOString(),
-      status: 'dissolved',
+      status: 'deleted',
     };
   }
 

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   UploadedFile,
   Get,
   Param,
@@ -21,6 +22,7 @@ import { AdminTransferDto } from './dto/admin-transfer.dto';
 import { LeaveGroupDto } from './dto/leave-group.dto';
 import { UpdateGroupAutoDeleteDto } from './dto/update-group-auto-delete.dto';
 import { UpdateGroupNameDto } from './dto/update-group-name.dto';
+import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { GroupsService } from './groups.service';
 
 @Controller('groups')
@@ -63,6 +65,47 @@ export class GroupsController {
     });
 
     return result;
+  }
+
+  @Delete(':groupId/members/:userId')
+  async removeMember(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) throw new BadRequestException('User ID is required');
+
+    const result = await this.groupsService.removeMember(
+      groupId,
+      user.userId,
+      userId,
+    );
+
+    this.chatGateway.emitGroupMemberLeft({
+      groupId,
+      userId,
+      leftAt: result.removedAt,
+      groupDeleted: false,
+    });
+
+    return result;
+  }
+
+  @Patch(':groupId/members/:userId/role')
+  async updateMemberRole(
+    @Param('groupId', ParseUUIDPipe) groupId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateMemberRoleDto,
+  ) {
+    if (!user?.userId) throw new BadRequestException('User ID is required');
+
+    return this.groupsService.updateMemberRole(
+      groupId,
+      user.userId,
+      userId,
+      dto.role,
+    );
   }
 
   @Patch(':groupId/admin-transfer')

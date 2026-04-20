@@ -80,11 +80,23 @@ type ConversationMessagesResult = {
     conversationId: string;
     senderId: string;
     content: string;
+    messageType?: string;
+    callData?: {
+      callType?: 'audio' | 'video';
+      callStatus?: 'completed' | 'missed' | 'declined';
+      duration?: number;
+      isInitiator?: boolean;
+      wasRejected?: boolean;
+    } | null;
     reactions: Array<{
       userId: string;
       emoji: string;
       reactedAt: Date | string;
     }>;
+    mediaUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
     attachments: Array<{
       mediaUrl?: string;
       fileName?: string;
@@ -619,6 +631,8 @@ export class ConversationService {
         conversationId,
         senderId,
         content: String(item.content || ''),
+        messageType: item.messageType,
+        callData: item.callData || null,
         reactions: Array.isArray(item.reactions)
           ? item.reactions.map((reaction) => ({
               userId: String(reaction.userId || ''),
@@ -626,6 +640,10 @@ export class ConversationService {
               reactedAt: this.toDate(reaction.reactedAt) || reaction.reactedAt,
             }))
           : [],
+        mediaUrl: item.mediaUrl,
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        mimeType: item.mimeType,
         attachments: item.mediaUrl
           ? [
               {
