@@ -84,11 +84,23 @@ type ConversationMessagesResult = {
     senderName?: string;
     senderAvatar?: string;
     content: string;
+    messageType?: string;
+    callData?: {
+      callType?: 'audio' | 'video';
+      callStatus?: 'completed' | 'missed' | 'declined';
+      duration?: number;
+      isInitiator?: boolean;
+      wasRejected?: boolean;
+    } | null;
     reactions: Array<{
       userId: string;
       emoji: string;
       reactedAt: Date | string;
     }>;
+    mediaUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
     attachments: Array<{
       mediaUrl?: string;
       fileName?: string;
@@ -98,7 +110,7 @@ type ConversationMessagesResult = {
     createdAt: Date | string;
     isPinned: boolean;
     recalled: boolean;
-    isRevoked: boolean; // ← Changed from recalled to isRevoked for mobile
+    isRevoked: boolean;
     deletedByAdmin: boolean;
     replyToMessageId: string | null;
     replyToMessagePreview?: {
@@ -690,6 +702,8 @@ export class ConversationService {
         senderName: item.senderName || 'Unknown',
         senderAvatar: item.senderAvatar || undefined,
         content: String(item.content || ''),
+        messageType: item.messageType,
+        callData: item.callData || null,
         reactions: Array.isArray(item.reactions)
           ? item.reactions.map((reaction) => ({
               userId: String(reaction.userId || ''),
@@ -697,12 +711,10 @@ export class ConversationService {
               reactedAt: this.toDate(reaction.reactedAt) || reaction.reactedAt,
             }))
           : [],
-        messageType: String(item.messageType || 'TEXT').toUpperCase(), // Normalize to UPPERCASE for consistency with mobile types
-        mediaUrl: item.mediaUrl || undefined, // Direct mediaUrl field for mobile
+        mediaUrl: item.mediaUrl,
         fileName: item.fileName,
         fileSize: item.fileSize,
         mimeType: item.mimeType,
-        isRevoked: recalled, // ← Mobile expects isRevoked, not recalled
         attachments: item.mediaUrl
           ? [
               {
@@ -716,6 +728,7 @@ export class ConversationService {
         createdAt: createdAtDate,
         isPinned: !!item.isPinned,
         recalled,
+        isRevoked: recalled,
         deletedByAdmin,
         replyToMessageId: item.replyToMessageId || null,
         replyToMessagePreview: item.replyToMessageId
