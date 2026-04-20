@@ -94,12 +94,28 @@ export class ConversationController {
       }) => Promise<unknown>;
     };
 
-    return groupHandler.createGroupConversation({
+    const conversation = await groupHandler.createGroupConversation({
       creatorId: currentUserId,
       groupName: String(body.groupName || ''),
       memberIds: body.memberIds,
       memberNicknames: body.memberNicknames,
     });
+
+    // Emit group created event to all members
+    if (conversation && typeof conversation === 'object') {
+      const conv = conversation as any;
+      if (conv.conversationId && conv.participants) {
+        const memberIds = conv.participants.map((p: any) => p.userId);
+        this.chatGateway.emitGroupCreated({
+          groupId: conv.conversationId,
+          groupName: conv.groupInfo?.groupName || '',
+          createdBy: currentUserId,
+          memberIds,
+        });
+      }
+    }
+
+    return conversation;
   }
 
   /**

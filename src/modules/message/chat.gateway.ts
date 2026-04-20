@@ -349,6 +349,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  /**
+   * Emit khi tạo group mới - gửi tới tất cả thành viên để họ refresh conversations
+   */
+  emitGroupCreated(payload: {
+    groupId: string;
+    groupName: string;
+    createdBy: string;
+    memberIds: string[];
+  }) {
+    // Gửi tới tất cả thành viên trong group
+    for (const memberId of payload.memberIds) {
+      this.server.to(`user:${memberId}`).emit('group:created', {
+        groupId: payload.groupId,
+        groupName: payload.groupName,
+        createdBy: payload.createdBy,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
   emitNewMessage(payload: {
     conversationId: string;
     messageId: string;
