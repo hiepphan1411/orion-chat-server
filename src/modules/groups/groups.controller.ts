@@ -99,6 +99,15 @@ export class GroupsController {
       dto.newAdminUserId,
     );
 
+    if (result.transferredAdmin) {
+      this.chatGateway.emitGroupAdminTransferred({
+        groupId,
+        oldAdminUserId: result.transferredAdmin.oldAdminUserId,
+        newAdminUserId: result.transferredAdmin.newAdminUserId,
+        transferredAt: result.transferredAdmin.transferredAt,
+      });
+    }
+
     this.chatGateway.emitGroupMemberLeft({
       groupId,
       userId: user.userId,
