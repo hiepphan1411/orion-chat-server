@@ -402,6 +402,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  // ✅ FIX: Thêm mediaUrl, fileName, fileSize, mimeType vào type signature
   emitNewMessage(payload: {
     conversationId: string;
     messageId: string;
@@ -410,6 +411,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     senderAvatar?: string;
     content: string;
     messageType?: string;
+    mediaUrl?: string; // ← THÊM: URL file/ảnh/video để bên B có thể preview ngay
+    fileName?: string; // ← THÊM: tên file gốc
+    fileSize?: number; // ← THÊM: kích thước file
+    mimeType?: string; // ← THÊM: MIME type (image/jpeg, video/mp4, ...)
     createdAt: any;
     clientMessageId?: string;
     replyToMessageId?: string;
@@ -441,6 +446,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           senderAvatar: payload.senderAvatar,
           content: payload.content,
           messageType: payload.messageType,
+          mediaUrl: payload.mediaUrl, // ← THÊM: broadcast URL cho bên nhận
+          fileName: payload.fileName, // ← THÊM
+          fileSize: payload.fileSize, // ← THÊM
+          mimeType: payload.mimeType, // ← THÊM
           createdAt: payload.createdAt,
           clientMessageId: payload.clientMessageId,
           replyToMessageId: payload.replyToMessageId,
@@ -693,7 +702,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Use senderId as fallback senderName
       }
 
-      // Emit to conversation room with sender info
+      // ✅ FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType vào emitNewMessage
+      // để bên B nhận được socket event với đủ thông tin preview media ngay lập tức
       this.emitNewMessage({
         conversationId: data.conversationId,
         messageId: String(message._id),
@@ -702,6 +712,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         senderAvatar: senderAvatar,
         content: data.content,
         messageType: data.type,
+        mediaUrl: data.mediaUrl, // ← THÊM: URL đã upload từ FE gửi lên
+        fileName: data.fileName, // ← THÊM
+        fileSize: data.fileSize, // ← THÊM
+        mimeType: message.mimeType, // ← THÊM: lấy từ document vừa lưu vào DB
         createdAt: message.createdAt,
         clientMessageId: data.clientMessageId,
         replyToMessageId: data.replyToMessageId,
