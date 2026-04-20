@@ -73,6 +73,37 @@ export class GroupsService {
     return membership;
   }
 
+  private pickSuccessorAdmin(
+    members: GroupMember[],
+    preferredUserId?: string,
+  ): GroupMember | null {
+    const ranked = [...members].sort((left, right) => {
+      const priority = (role: GroupMemberRole) => {
+        if (role === GroupMemberRole.ADMIN) return 3;
+        if (role === GroupMemberRole.CO_ADMIN) return 2;
+        return 1;
+      };
+
+      const roleDiff = priority(right.role) - priority(left.role);
+      if (roleDiff !== 0) return roleDiff;
+
+      const leftTime = new Date(left.joinedAt).getTime();
+      const rightTime = new Date(right.joinedAt).getTime();
+      return leftTime - rightTime;
+    });
+
+    if (preferredUserId) {
+      const preferred = ranked.find(
+        (member) => member.user.userId === preferredUserId,
+      );
+      if (preferred) {
+        return preferred;
+      }
+    }
+
+    return ranked[0] || null;
+  }
+
   async getMembers(groupId: string, userId: string) {
     await this.requireGroupMembership(groupId, userId);
 
@@ -261,19 +292,34 @@ export class GroupsService {
       (m) => m.user.userId !== actorUserId,
     );
 
-    if (this.isAdminRole(actor.role) && remainingMembers.length > 0) {
-      if (!newAdminUserId) {
-        throw new BadRequestException('ADMIN_TRANSFER_REQUIRED');
-      }
+    let transferredAdmin:
+      | {
+          oldAdminUserId: string;
+          newAdminUserId: string;
+          transferredAt: string;
+        }
+      | undefined;
 
-      const exists = remainingMembers.some(
-        (m) => m.user.userId === newAdminUserId,
+    const needsTransfer =
+      (actor.role === GroupMemberRole.OWNER ||
+        actor.role === GroupMemberRole.ADMIN) &&
+      remainingMembers.length > 0;
+
+    if (needsTransfer) {
+      const successor = this.pickSuccessorAdmin(
+        remainingMembers,
+        newAdminUserId,
       );
-      if (!exists) {
+
+      if (!successor) {
         throw new NotFoundException('MEMBER_NOT_FOUND');
       }
 
-      await this.transferAdmin(groupId, actorUserId, newAdminUserId);
+      transferredAdmin = await this.transferAdmin(
+        groupId,
+        actorUserId,
+        successor.user.userId,
+      );
     }
 
     await this.groupMemberRepo.manager.transaction(async (manager) => {
@@ -295,6 +341,7 @@ export class GroupsService {
       leftUserId: actorUserId,
       leftAt: new Date().toISOString(),
       groupDeleted: remainingMembers.length === 0,
+      transferredAdmin,
     };
   }
 

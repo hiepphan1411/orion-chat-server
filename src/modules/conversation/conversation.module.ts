@@ -9,6 +9,7 @@ import { Conversation } from './entities/conversation.schema';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { GroupConversation } from './entities/group-conversation.entity';
 import { GroupMember } from '../group-member/entities/group-member.entity';
+import { GroupsModule } from '../groups/groups.module';
 
 import { Message, MessageSchema } from '../message/message.schema';
 import { MessageModule } from '../message/message.module';
@@ -25,6 +26,7 @@ import { User } from '../users/entities/user.entity';
     ]),
     MongooseModule.forFeature([{ name: Message.name, schema: MessageSchema }]),
     MessageModule,
+    GroupsModule,
   ],
   controllers: [ConversationController],
   providers: [ConversationService],

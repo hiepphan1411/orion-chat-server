@@ -26,6 +26,19 @@ import {
   RevealConversationDTO,
 } from './dto/hide-conversation.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { GroupsService } from '../groups/groups.service';
+
+type LeaveGroupResult = {
+  groupId: string;
+  leftUserId: string;
+  leftAt: string;
+  groupDeleted: boolean;
+  transferredAdmin?: {
+    oldAdminUserId: string;
+    newAdminUserId: string;
+    transferredAt: string;
+  };
+};
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -34,6 +47,7 @@ export class ConversationController {
     private readonly conversationService: ConversationService,
     private readonly messageService: MessageService,
     private readonly chatGateway: ChatGateway,
+    private readonly groupsService: GroupsService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -851,5 +865,47 @@ export class ConversationController {
       conversationId,
       user.userId,
     );
+  }
+
+  /**
+   * Leave a group conversation from the conversation namespace.
+   * This endpoint exists for FE compatibility with /conversations/:id/leave.
+   */
+  @Post(':conversationId/leave')
+  async leaveConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body()
+    body?: {
+      newAdminUserId?: string;
+    },
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    const result = (await this.groupsService.leaveGroup(
+      conversationId,
+      user.userId,
+      body?.newAdminUserId,
+    )) as LeaveGroupResult;
+
+    if (result.transferredAdmin) {
+      this.chatGateway.emitGroupAdminTransferred({
+        groupId: conversationId,
+        oldAdminUserId: result.transferredAdmin.oldAdminUserId,
+        newAdminUserId: result.transferredAdmin.newAdminUserId,
+        transferredAt: result.transferredAdmin.transferredAt,
+      });
+    }
+
+    this.chatGateway.emitGroupMemberLeft({
+      groupId: conversationId,
+      userId: user.userId,
+      leftAt: result.leftAt,
+      groupDeleted: result.groupDeleted,
+    });
+
+    return result;
   }
 }

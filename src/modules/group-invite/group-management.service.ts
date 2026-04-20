@@ -494,11 +494,11 @@ export class GroupManagementService {
     if (!targetMembership) {
       throw new NotFoundException('Target user is not a group member');
     }
-
-    if (targetMembership.role !== GroupMemberRole.MEMBER) {
-      throw new BadRequestException(
-        'User already has an elevated role in this group',
-      );
+    if (
+      targetMembership.role === GroupMemberRole.ADMIN ||
+      targetMembership.role === GroupMemberRole.OWNER
+    ) {
+      throw new BadRequestException('Cannot change role of this user');
     }
 
     targetMembership.role = GroupMemberRole.CO_ADMIN;

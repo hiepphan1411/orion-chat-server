@@ -87,6 +87,43 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly participantRepo: Repository<ConversationParticipant>,
   ) {}
 
+  private emitToConversationRooms(
+    conversationId: string,
+    event: string,
+    payload: unknown,
+  ) {
+    // Support both legacy and plain room ids so FE can receive events regardless
+    // of which room naming convention it joined.
+    this.server
+      .to(`conversation:${conversationId}`)
+      .to(conversationId)
+      .emit(event, payload);
+  }
+
+  private async buildMemberPayload(userId: string) {
+    try {
+      const user = await this.usersService.getProfile(userId);
+      if (user?.data) {
+        return {
+          userId,
+          fullName: user.data.fullName || null,
+          avatarUrl: user.data.avatarUrl || null,
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        `[ChatGateway] Failed to load profile for ${userId}`,
+        error,
+      );
+    }
+
+    return {
+      userId,
+      fullName: null,
+      avatarUrl: null,
+    };
+  }
+
   handleConnection(client: Socket) {
     const userId = this.extractUserId(client);
 
@@ -222,10 +259,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     userId: string;
     leftAt: string;
     groupDeleted: boolean;
+    changeType?: 'leave' | 'kick';
   }) {
-    this.server
-      .to(`conversation:${payload.groupId}`)
-      .emit('group:member_left', payload);
+    this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+      type: payload.changeType || 'leave',
+      userId: payload.userId,
+      at: payload.leftAt,
+      groupDeleted: payload.groupDeleted,
+    });
   }
 
   emitGroupMembersAdded(payload: {
@@ -234,9 +275,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     userIds: string[];
     addedAt: string;
   }) {
-    this.server
-      .to(`conversation:${payload.groupId}`)
-      .emit('group:members_added', payload);
+    void Promise.all(
+      payload.userIds.map(async (userId) => {
+        const user = await this.buildMemberPayload(userId);
+        this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+          type: 'join',
+          user,
+          addedBy: payload.addedBy,
+          at: payload.addedAt,
+        });
+      }),
+    );
   }
 
   emitGroupAutoDeleteUpdated(payload: {
@@ -300,9 +349,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     userId: string;
     joinedAt: string;
   }) {
-    this.server
-      .to(`conversation:${payload.groupId}`)
-      .emit('group:member_joined', payload);
+    void this.buildMemberPayload(payload.userId).then((user) => {
+      this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+        type: 'join',
+        user,
+        at: payload.joinedAt,
+      });
+    });
   }
 
   emitGroupInfoUpdated(payload: {
@@ -360,6 +413,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     createdAt: any;
     clientMessageId?: string;
     replyToMessageId?: string;
+    replyToMessagePreview?: {
+      messageId: string;
+      content: string;
+      senderName: string;
+      snippet: string;
+      createdAt: Date | string | null;
+    };
     messageStatus?: string;
     callData?: {
       callType?: 'audio' | 'video';
@@ -384,6 +444,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           createdAt: payload.createdAt,
           clientMessageId: payload.clientMessageId,
           replyToMessageId: payload.replyToMessageId,
+          replyToMessagePreview: payload.replyToMessagePreview,
           messageStatus: payload.messageStatus,
           callData: payload.callData || null,
         },
@@ -445,6 +506,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `[ChatGateway] Joining conversation: ${data.conversationId}`,
       );
       void client.join(`conversation:${data.conversationId}`);
+      void client.join(data.conversationId);
 
       return this.buildSuccessAck(data.requestId, {
         conversationId: data.conversationId,
@@ -536,6 +598,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.conversationId,
       );
 
+      let replyToMessagePreview:
+        | {
+            messageId: string;
+            content: string;
+            senderName: string;
+            snippet: string;
+            createdAt: Date | string | null;
+          }
+        | undefined;
+
       if (data.replyToMessageId) {
         const replyMessage = await this.messageModel
           .findOne({
@@ -543,8 +615,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             conversationId: data.conversationId,
             isDeleted: false,
           })
-          .select('_id')
-          .lean<{ _id: unknown } | null>()
+          .select('_id content senderBy createdAt')
+          .lean<{
+            _id: unknown;
+            content?: string;
+            senderBy: string;
+            createdAt?: Date | string;
+          } | null>()
           .exec();
 
         if (!replyMessage) {
@@ -555,6 +632,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             false,
           );
         }
+
+        let replySenderName = 'Unknown';
+        try {
+          const replySender = await this.usersService.getProfile(
+            replyMessage.senderBy,
+          );
+          if (replySender?.data?.fullName) {
+            replySenderName = replySender.data.fullName;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `[ChatGateway] Could not fetch reply sender info for ${replyMessage.senderBy}`,
+            error,
+          );
+        }
+
+        const replyContent = String(replyMessage.content || '');
+        replyToMessagePreview = {
+          messageId: String(replyMessage._id),
+          content: replyContent,
+          senderName: replySenderName,
+          snippet: replyContent.slice(0, 100),
+          createdAt: replyMessage.createdAt || null,
+        };
       }
 
       // Create message in database
@@ -604,6 +705,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         createdAt: message.createdAt,
         clientMessageId: data.clientMessageId,
         replyToMessageId: data.replyToMessageId,
+        replyToMessagePreview,
         messageStatus: 'SENT',
         callData: data.callData || null,
       });

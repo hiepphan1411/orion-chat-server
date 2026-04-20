@@ -8,6 +8,7 @@ import { GroupMember } from '../group-member/entities/group-member.entity';
 import { MessageModule } from '../message/message.module';
 import { User } from '../users/entities/user.entity';
 import { GroupsController } from './groups.controller';
+import { GroupLeaveController } from './group-leave.controller';
 import { GroupsService } from './groups.service';
 
 @Module({
@@ -22,7 +23,7 @@ import { GroupsService } from './groups.service';
     MessageModule,
     CommonModule,
   ],
-  controllers: [GroupsController],
+  controllers: [GroupsController, GroupLeaveController],
   providers: [GroupsService],
   exports: [GroupsService],
 })
