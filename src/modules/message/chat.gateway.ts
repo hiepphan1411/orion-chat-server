@@ -604,15 +604,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             isDeleted: false,
           })
           .select('_id content senderBy createdAt')
-          .lean<
-            | {
-                _id: unknown;
-                content?: string;
-                senderBy: string;
-                createdAt?: Date | string;
-              }
-            | null
-          >()
+          .lean<{
+            _id: unknown;
+            content?: string;
+            senderBy: string;
+            createdAt?: Date | string;
+          } | null>()
           .exec();
 
         if (!replyMessage) {
