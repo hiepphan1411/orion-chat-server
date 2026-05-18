@@ -11,9 +11,12 @@ import { User } from '../users/entities/user.entity';
 import { Task } from '../task/entities/task.entity';
 import { TaskAssignee } from '../task/entities/task-assignee.entity';
 import { TaskBoard } from '../task-board/entities/task-board.entity';
+import { Sprint } from '../sprint/entities/sprint.entity';
+import { ActivityLog } from '../activity-log/entities/activity-log.entity';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
+import { TaskStatus } from 'src/common/enums/task-status.enum';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -31,6 +34,10 @@ export class WorkspaceService {
     private taskAssigneeRepo: Repository<TaskAssignee>,
     @InjectRepository(TaskBoard)
     private taskBoardRepo: Repository<TaskBoard>,
+    @InjectRepository(Sprint)
+    private sprintRepo: Repository<Sprint>,
+    @InjectRepository(ActivityLog)
+    private activityLogRepo: Repository<ActivityLog>,
   ) {}
 
   /**
@@ -432,6 +439,410 @@ export class WorkspaceService {
       boards: boardsReport,
       members: membersReport,
       overdue: overdueTasks,
+    };
+  }
+
+  /**
+   * Aggregate AI Insights cho workspace
+   */
+  async getInsights(workspaceId: string) {
+    const boards = await this.taskBoardRepo.find({
+      where: { workspace: { workspaceId } },
+    });
+    const boardIds = boards.map((b) => b.boardId);
+
+    if (boardIds.length === 0) {
+      return {
+        progressPercentage: 0,
+        totalTasks: 0,
+        completedTasks: 0,
+        overdueTasks: 0,
+        unclaimedTasks: 0,
+        burndownData: [],
+        velocityData: [],
+        riskAlerts: [],
+        memberPerformance: [],
+        aiSuggestions: [],
+        dailyDigest: [],
+      };
+    }
+
+    const tasks = await this.taskRepo
+      .createQueryBuilder('task')
+      .leftJoinAndSelect('task.board', 'board')
+      .leftJoin('board.workspace', 'workspace')
+      .leftJoinAndSelect('task.assignees', 'assignees')
+      .leftJoinAndSelect('assignees.user', 'assigneeUser')
+      .leftJoinAndSelect('task.labels', 'labels')
+      .leftJoinAndSelect('task.sprint', 'sprint')
+      .where('workspace.workspaceId = :workspaceId', { workspaceId })
+      .orderBy('task.updatedAt', 'DESC')
+      .getMany();
+
+    const now = new Date();
+    const totalTasks = tasks.length;
+    const completedTasks = tasks.filter((t) => t.status === TaskStatus.DONE)
+      .length;
+    const overdueTasks = tasks.filter(
+      (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== TaskStatus.DONE,
+    ).length;
+    const unclaimedTasks = tasks.filter(
+      (t) => !t.assignees || t.assignees.length === 0,
+    ).length;
+    const progressPercentage =
+      totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+    const burndownData = this.buildBurndownData(tasks);
+    const velocityData = await this.buildVelocityData(workspaceId, tasks);
+    const memberPerformance = await this.buildMemberPerformance(
+      workspaceId,
+      tasks,
+    );
+    const riskAlerts = this.buildRiskAlerts(
+      tasks,
+      memberPerformance,
+      progressPercentage,
+      overdueTasks,
+    );
+    const aiSuggestions = this.buildSuggestions(
+      unclaimedTasks,
+      overdueTasks,
+      memberPerformance,
+    );
+    const dailyDigest = await this.buildDailyDigest(workspaceId);
+
+    return {
+      progressPercentage,
+      totalTasks,
+      completedTasks,
+      overdueTasks,
+      unclaimedTasks,
+      burndownData,
+      velocityData,
+      riskAlerts,
+      memberPerformance,
+      aiSuggestions,
+      dailyDigest,
+    };
+  }
+
+  private buildBurndownData(tasks: Task[]) {
+    const activeRange = this.resolveBurndownRange(tasks);
+    if (!activeRange) return [];
+
+    const { startDate, endDate } = activeRange;
+    const days = this.buildDateSeries(startDate, endDate);
+    if (days.length === 0) return [];
+
+    const startTotal = tasks.filter((task) => {
+      const createdAt = new Date(task.createdAt);
+      const completedAt = task.completedAt ? new Date(task.completedAt) : null;
+      return (
+        createdAt <= startDate && (!completedAt || completedAt >= startDate)
+      );
+    }).length;
+
+    const baseTotal = startTotal || tasks.length;
+
+    return days.map((day, index) => {
+      const endOfDay = new Date(day);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const remaining = tasks.filter((task) => {
+        const createdAt = new Date(task.createdAt);
+        const completedAt = task.completedAt ? new Date(task.completedAt) : null;
+        return (
+          createdAt <= endOfDay && (!completedAt || completedAt > endOfDay)
+        );
+      }).length;
+
+      const ideal =
+        baseTotal - Math.round((baseTotal * index) / (days.length - 1 || 1));
+
+      return {
+        date: day.toISOString().split('T')[0],
+        ideal: Math.max(0, ideal),
+        actual: remaining,
+      };
+    });
+  }
+
+  private resolveBurndownRange(tasks: Task[]) {
+    if (tasks.length === 0) return null;
+
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    return { startDate: start, endDate: end };
+  }
+
+  private buildDateSeries(startDate: Date, endDate: Date) {
+    const dates: Date[] = [];
+    const cursor = new Date(startDate);
+    while (cursor <= endDate) {
+      dates.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+
+  private async buildVelocityData(workspaceId: string, tasks: Task[]) {
+    const sprints = await this.sprintRepo.find({
+      where: { workspace: { workspaceId } },
+      order: { startDate: 'DESC', createdAt: 'DESC' },
+      take: 4,
+    });
+
+    if (sprints.length === 0) return [];
+
+    return sprints
+      .slice()
+      .reverse()
+      .map((sprint) => {
+        const sprintTasks = tasks.filter(
+          (task) => task.sprint?.sprintId === sprint.sprintId,
+        );
+        const completed = sprintTasks.filter(
+          (task) => task.status === TaskStatus.DONE,
+        ).length;
+        return {
+          sprint: sprint.name || sprint.sprintId.slice(0, 6),
+          planned: sprintTasks.length,
+          completed,
+        };
+      });
+  }
+
+  private async buildMemberPerformance(
+    workspaceId: string,
+    tasks: Task[],
+  ) {
+    const now = new Date();
+    const members = await this.memberRepo.find({
+      where: { workspace: { workspaceId } },
+      relations: ['user'],
+    });
+
+    const tasksByUser = new Map<string, Task[]>();
+    for (const task of tasks) {
+      for (const assignee of task.assignees ?? []) {
+        const userId = assignee.user?.userId;
+        if (!userId) continue;
+        if (!tasksByUser.has(userId)) tasksByUser.set(userId, []);
+        tasksByUser.get(userId)!.push(task);
+      }
+    }
+
+    return members.map((member) => {
+      const memberTasks = tasksByUser.get(member.user.userId) ?? [];
+      const completed = memberTasks.filter(
+        (task) => task.status === TaskStatus.DONE,
+      );
+      const inProgress = memberTasks.filter(
+        (task) =>
+          task.status === TaskStatus.IN_PROGRESS ||
+          task.status === TaskStatus.REVIEW,
+      );
+
+      const avgCompletionDays = completed.length
+        ? completed.reduce((sum, task) => {
+            const created = new Date(task.createdAt).getTime();
+            const completedAt = task.completedAt
+              ? new Date(task.completedAt).getTime()
+              : now.getTime();
+            return sum + (completedAt - created) / (1000 * 60 * 60 * 24);
+          }, 0) / completed.length
+        : 0;
+
+      const onTimeTasks = completed.filter((task) =>
+        task.dueDate
+          ? new Date(task.completedAt || now) <= new Date(task.dueDate)
+          : true,
+      );
+
+      const onTimeRate = completed.length
+        ? Math.round((onTimeTasks.length / completed.length) * 100)
+        : 0;
+
+      return {
+        user: this.mapUser(member.user),
+        tasksCompleted: completed.length,
+        tasksInProgress: inProgress.length,
+        avgCompletionDays: Math.round(avgCompletionDays * 10) / 10,
+        onTimeRate,
+      };
+    });
+  }
+
+  private buildRiskAlerts(
+    tasks: Task[],
+    memberPerformance: Array<{
+      user: { id: string };
+      tasksInProgress: number;
+    }>,
+    completionRate: number,
+    overdueCount: number,
+  ) {
+    const now = new Date();
+    const alerts: Array<{
+      id: string;
+      type: 'deadline' | 'stale' | 'overloaded' | 'low_completion';
+      severity: 'warning' | 'critical';
+      message: string;
+      taskId?: string;
+      userId?: string;
+    }> = [];
+
+    if (overdueCount > 0) {
+      alerts.push({
+        id: `risk-deadline-${Date.now()}`,
+        type: 'deadline',
+        severity: overdueCount > 5 ? 'critical' : 'warning',
+        message: `${overdueCount} tasks are overdue. Review deadlines and blockers.`,
+      });
+    }
+
+    const staleTasks = tasks.filter((task) => {
+      if (task.status === TaskStatus.DONE) return false;
+      const updated = new Date(task.updatedAt).getTime();
+      return now.getTime() - updated > 7 * 24 * 60 * 60 * 1000;
+    });
+
+    if (staleTasks.length > 0) {
+      alerts.push({
+        id: `risk-stale-${Date.now()}`,
+        type: 'stale',
+        severity: 'warning',
+        message: `${staleTasks.length} tasks have no updates in 7+ days.`,
+      });
+    }
+
+    const overloaded = memberPerformance.find((m) => m.tasksInProgress >= 6);
+    if (overloaded) {
+      alerts.push({
+        id: `risk-overloaded-${Date.now()}`,
+        type: 'overloaded',
+        severity: 'warning',
+        message: 'Some members are overloaded. Consider reassigning tasks.',
+        userId: overloaded.user.id,
+      });
+    }
+
+    if (completionRate < 50 && tasks.length >= 5) {
+      alerts.push({
+        id: `risk-low-completion-${Date.now()}`,
+        type: 'low_completion',
+        severity: 'warning',
+        message: 'Completion rate is below 50%. Review scope and priorities.',
+      });
+    }
+
+    return alerts;
+  }
+
+  private buildSuggestions(
+    unclaimedTasks: number,
+    overdueTasks: number,
+    memberPerformance: Array<{ tasksInProgress: number }>,
+  ) {
+    const suggestions: Array<{
+      id: string;
+      type: 'reassign' | 'deadline' | 'priority' | 'split';
+      title: string;
+      description: string;
+      actionLabel: string;
+    }> = [];
+
+    if (unclaimedTasks > 0) {
+      suggestions.push({
+        id: `suggest-assign-${Date.now()}`,
+        type: 'reassign',
+        title: 'Assign unclaimed tasks',
+        description: `There are ${unclaimedTasks} tasks without an assignee.`,
+        actionLabel: 'Assign now',
+      });
+    }
+
+    if (overdueTasks > 0) {
+      suggestions.push({
+        id: `suggest-deadline-${Date.now()}`,
+        type: 'deadline',
+        title: 'Review overdue tasks',
+        description: 'Check blockers and adjust deadlines for overdue tasks.',
+        actionLabel: 'Review deadlines',
+      });
+    }
+
+    const overloaded = memberPerformance.some((m) => m.tasksInProgress >= 6);
+    if (overloaded) {
+      suggestions.push({
+        id: `suggest-rebalance-${Date.now()}`,
+        type: 'reassign',
+        title: 'Rebalance workload',
+        description: 'Some members have high in-progress load.',
+        actionLabel: 'Reassign tasks',
+      });
+    }
+
+    if (suggestions.length === 0) {
+      suggestions.push({
+        id: `suggest-split-${Date.now()}`,
+        type: 'split',
+        title: 'Split large tasks',
+        description: 'Consider splitting complex tasks to improve flow.',
+        actionLabel: 'Review tasks',
+      });
+    }
+
+    return suggestions.slice(0, 4);
+  }
+
+  private async buildDailyDigest(workspaceId: string) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const logs = await this.activityLogRepo
+      .createQueryBuilder('al')
+      .innerJoin('al.task', 'task')
+      .innerJoin('task.board', 'board')
+      .innerJoin('board.workspace', 'workspace')
+      .leftJoinAndSelect('al.user', 'user')
+      .where('workspace.workspaceId = :workspaceId', { workspaceId })
+      .andWhere('al.timestamp >= :since', { since })
+      .orderBy('al.timestamp', 'DESC')
+      .take(8)
+      .getMany();
+
+    return logs.map((log) => {
+      const action = log.action || '';
+      const type = action.includes('completed')
+        ? 'completed'
+        : action.includes('created')
+          ? 'created'
+          : action.includes('assigned')
+            ? 'assigned'
+            : 'overdue';
+
+      return {
+        id: log.activityId,
+        type,
+        message: log.description,
+        timestamp: log.timestamp.toISOString(),
+      };
+    });
+  }
+
+  private mapUser(user: User) {
+    return {
+      id: user.userId,
+      name: user.fullName,
+      email: user.email ?? '',
+      phone: user.phoneNumber ?? undefined,
+      avatar: user.avatarUrl ?? '/avatar-user.png',
+      status: user.isOnline ? 'online' : 'offline',
     };
   }
 }

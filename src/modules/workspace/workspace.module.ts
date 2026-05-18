@@ -6,6 +6,8 @@ import { User } from '../users/entities/user.entity';
 import { Task } from '../task/entities/task.entity';
 import { TaskAssignee } from '../task/entities/task-assignee.entity';
 import { TaskBoard } from '../task-board/entities/task-board.entity';
+import { Sprint } from '../sprint/entities/sprint.entity';
+import { ActivityLog } from '../activity-log/entities/activity-log.entity';
 import { WorkspaceService } from './workspace.service';
 import { WorkspaceController } from './workspace.controller';
 
@@ -18,6 +20,8 @@ import { WorkspaceController } from './workspace.controller';
       Task,
       TaskAssignee,
       TaskBoard,
+      Sprint,
+      ActivityLog,
     ]),
   ],
   controllers: [WorkspaceController],

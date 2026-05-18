@@ -11,11 +11,15 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import type { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { AIRagService } from './ai-rag.service';
+import { AIRagIngestService } from './ai-rag-ingest.service';
 
 @Controller('ai-rag')
 @UseGuards(JwtAuthGuard)
 export class AIRagController {
-  constructor(private readonly aiRagService: AIRagService) {}
+  constructor(
+    private readonly aiRagService: AIRagService,
+    private readonly aiRagIngestService: AIRagIngestService,
+  ) {}
 
   @Post('documents')
   async ingestDocument(
@@ -175,5 +179,23 @@ export class AIRagController {
   }> {
     const result = await this.aiRagService.runABTest(user.userId, body);
     return result;
+  }
+
+  @Post('workspace/:workspaceId/ingest')
+  async ingestWorkspace(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('workspaceId') workspaceId: string,
+    @Body()
+    body: {
+      sources?: Array<'tasks' | 'documents' | 'meetings' | 'notes'>;
+      since?: string;
+      limit?: number;
+    },
+  ) {
+    return this.aiRagIngestService.ingestWorkspace(
+      user.userId,
+      workspaceId,
+      body,
+    );
   }
 }

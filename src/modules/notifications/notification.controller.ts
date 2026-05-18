@@ -37,6 +37,24 @@ export class NotificationController {
     return this.notificationService.countUnread(user.userId);
   }
 
+  @Get('me/digest')
+  getMyDigest(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('sinceHours') sinceHours?: string,
+    @Query('includeRead') includeRead?: string,
+    @Query('useAI') useAI?: string,
+    @Query('maxItems') maxItems?: string,
+  ) {
+    const parsedSince = Number(sinceHours || 24);
+    const parsedMax = Number(maxItems || 40);
+    return this.notificationService.buildDigest(user.userId, {
+      sinceHours: Number.isNaN(parsedSince) ? 24 : parsedSince,
+      includeRead: includeRead === 'true',
+      useAI: useAI !== 'false',
+      maxItems: Number.isNaN(parsedMax) ? 40 : parsedMax,
+    });
+  }
+
   @Patch(':id/read')
   markAsRead(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
     return this.notificationService.markAsRead(id, user.userId);

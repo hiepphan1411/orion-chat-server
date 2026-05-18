@@ -59,6 +59,11 @@ export class WorkspaceController {
     return this.workspaceService.getReports(id);
   }
 
+  @Get(':id/insights')
+  getInsights(@Param('id') id: string) {
+    return this.workspaceService.getInsights(id);
+  }
+
   @Post(':id/invite-link')
   generateInviteLink(@Param('id') id: string) {
     return this.workspaceService.generateInviteLink(id);

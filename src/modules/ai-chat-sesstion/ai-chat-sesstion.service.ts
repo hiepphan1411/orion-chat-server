@@ -14,6 +14,7 @@ import {
 import { AIMessageService } from '../ai-message/ai-message.service';
 import { AIMessageRole } from 'src/common/enums/ai-message-role.enum';
 import { AIRagService } from '../ai-rag/ai-rag.service';
+import type { AIActionSuggestion } from '../ai-actions/ai-action.types';
 import axios from 'axios';
 
 interface GeminiInlineAttachment {
@@ -104,7 +105,11 @@ export class AIChatSessionService {
     userId: string,
     message: string,
     attachment?: GeminiInlineAttachment,
-  ): Promise<{ assistantMessage: string; tokenUsed?: number }> {
+  ): Promise<{
+    assistantMessage: string;
+    tokenUsed?: number;
+    suggestedActions?: AIActionSuggestion[];
+  }> {
     const trimmed = message.trim();
     const isAudioAttachment = attachment?.mimeType.startsWith('audio/');
     const isVoicePlaceholder =
@@ -202,6 +207,14 @@ export class AIChatSessionService {
 
       const tokenUsed = response.data.usageMetadata?.totalTokenCount;
 
+      const suggestedActions = await this.generateSuggestedActions({
+        model,
+        apiKey,
+        systemPrompt,
+        messages,
+        latestUserMessage: trimmed,
+      });
+
       await this.messageService.createMessage(
         sessionId,
         assistantMessage,
@@ -213,7 +226,7 @@ export class AIChatSessionService {
         .findByIdAndUpdate(sessionId, { updatedAt: new Date() })
         .exec();
 
-      return { assistantMessage, tokenUsed };
+      return { assistantMessage, tokenUsed, suggestedActions };
     } catch (error) {
       throw new InternalServerErrorException(
         `Gemini request failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -233,5 +246,109 @@ export class AIChatSessionService {
       throw new BadRequestException('You cannot access this session');
     }
     return session;
+  }
+
+  private async generateSuggestedActions(params: {
+    model: string;
+    apiKey: string;
+    systemPrompt: string;
+    messages: Array<{ content: string; aiMessageRole: AIMessageRole }>;
+    latestUserMessage: string;
+  }): Promise<AIActionSuggestion[]> {
+    if (!params.latestUserMessage) return [];
+
+    const recentMessages = params.messages
+      .slice(-8)
+      .map((item) =>
+        `${item.aiMessageRole === AIMessageRole.USER ? 'USER' : 'ASSISTANT'}: ${item.content}`
+          .trim(),
+      )
+      .join('\n');
+
+    const actionSystemPrompt =
+      'You are an action planner for a workspace + chat system. ' +
+      'Your job is to propose up to 3 helpful actions based on the conversation. ' +
+      'Return STRICT JSON only, no markdown. ' +
+      'Schema: {"actions":[{"id":"string","type":"create_task|summarize_unread|schedule_meeting|update_task|set_priority|follow_up","title":"string","description":"string","payload":{},"requiresApproval":true,"requiredFields":[]}]}.' +
+      'If an action needs more info (workspaceId, boardId, dates, assigneeIds), list them in requiredFields. ' +
+      'If no clear actions, return {"actions":[]}.';
+
+    const actionPrompt =
+      `System context: ${params.systemPrompt}\n\n` +
+      `Conversation:\n${recentMessages}\n\n` +
+      `Latest user message:\n${params.latestUserMessage}\n\n` +
+      'Propose actions now.';
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${params.model}:generateContent?key=${params.apiKey}`;
+
+    try {
+      const response = await axios.post<GeminiResponse>(endpoint, {
+        systemInstruction: {
+          parts: [{ text: actionSystemPrompt }],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: actionPrompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+        },
+      });
+
+      const responseText = response.data.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? '')
+        .join('')
+        .trim();
+
+      if (!responseText) return [];
+
+      const jsonPayload = this.extractJsonPayload(responseText);
+      if (!jsonPayload) return [];
+
+      const parsed = JSON.parse(jsonPayload) as { actions?: AIActionSuggestion[] };
+      if (!parsed || !Array.isArray(parsed.actions)) return [];
+
+      return this.normalizeSuggestedActions(parsed.actions);
+    } catch (error) {
+      console.warn('AI suggested actions generation failed:', error);
+      return [];
+    }
+  }
+
+  private extractJsonPayload(text: string): string | null {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) return null;
+    return text.slice(start, end + 1);
+  }
+
+  private normalizeSuggestedActions(
+    actions: AIActionSuggestion[],
+  ): AIActionSuggestion[] {
+    const allowedTypes = new Set([
+      'create_task',
+      'summarize_unread',
+      'schedule_meeting',
+      'update_task',
+      'set_priority',
+      'follow_up',
+    ]);
+
+    return actions
+      .filter((action) => action && allowedTypes.has(action.type))
+      .slice(0, 3)
+      .map((action, index) => ({
+        id: action.id || `action-${Date.now()}-${index}`,
+        type: action.type,
+        title: action.title || 'Suggested action',
+        description: action.description || '',
+        payload: action.payload ?? {},
+        requiresApproval: true,
+        requiredFields: Array.isArray(action.requiredFields)
+          ? action.requiredFields
+          : [],
+      }));
   }
 }
