@@ -5,7 +5,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 
 export interface UploadResult {
@@ -75,7 +76,21 @@ export class S3UploadService {
     file: Express.Multer.File,
     keyPrefix = 'uploads',
   ): Promise<UploadResult> {
-    const normalizedName = file.originalname.replace(/\s+/g, '-');
+    return this.uploadBuffer(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      keyPrefix,
+    );
+  }
+
+  async uploadBuffer(
+    buffer: Buffer,
+    originalName: string,
+    contentType: string,
+    keyPrefix = 'uploads',
+  ): Promise<UploadResult> {
+    const normalizedName = originalName.replace(/\s+/g, '-');
     const key =
       this.normalizePrefix(keyPrefix) +
       Date.now() +
@@ -88,8 +103,8 @@ export class S3UploadService {
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype,
+        Body: buffer,
+        ContentType: contentType,
         ACL: 'public-read',
       }),
     );
@@ -99,6 +114,42 @@ export class S3UploadService {
       bucket: this.bucket,
       url: this.resolvePublicUrl(key, this.bucket, this.region),
     };
+  }
+
+  async uploadBufferToKey(
+    buffer: Buffer,
+    key: string,
+    contentType: string,
+  ): Promise<UploadResult> {
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key.replace(/^\/+/, ''),
+        Body: buffer,
+        ContentType: contentType,
+        ACL: 'public-read',
+      }),
+    );
+
+    return {
+      key: key.replace(/^\/+/, ''),
+      bucket: this.bucket,
+      url: this.resolvePublicUrl(key.replace(/^\/+/, ''), this.bucket, this.region),
+    };
+  }
+
+  async getPresignedDownloadUrl(
+    key: string,
+    expiresInSeconds = 60 * 10,
+  ): Promise<string> {
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }),
+      { expiresIn: expiresInSeconds },
+    );
   }
 
   async uploadFilesConcurrently(

@@ -55,6 +55,7 @@ import { Document } from './modules/document/entities/document.entity';
 import { DocumentVersion } from './modules/document/entities/document-version.entity';
 import { InlineComment } from './modules/document/entities/inline-comment.entity';
 import { WorkspaceFile } from './modules/workspace-file/entities/workspace-file.entity';
+import { WorkspaceFileVersion } from './modules/workspace-file/entities/workspace-file-version.entity';
 import { Goal } from './modules/goal/entities/goal.entity';
 import { KeyResult } from './modules/goal/entities/key-result.entity';
 import { Sprint } from './modules/sprint/entities/sprint.entity';
@@ -131,6 +132,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
         DocumentVersion,
         InlineComment,
         WorkspaceFile,
+        WorkspaceFileVersion,
         Goal,
         KeyResult,
         Sprint,
