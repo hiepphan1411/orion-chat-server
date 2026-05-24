@@ -31,7 +31,7 @@ export class AIChatSessionController {
   ) {
     return this.sessionService.createSession(
       user.userId,
-      body.aiModel || 'gemini-2.5-flash',
+      body.aiModel || 'qwen2.5:7b',
       body.systemPrompt,
       body.title,
     );

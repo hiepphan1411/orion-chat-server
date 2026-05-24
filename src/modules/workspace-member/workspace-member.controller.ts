@@ -15,46 +15,6 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
 
-/**
- * API Thành viên Workspace
- *
- * POST   /workspaces/:workspaceId/members             → Thêm thành viên
- *   - Body: { userId: string, role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'GUEST' }
- *   - Kiểm tra: user tồn tại, chưa là member, chưa đầy chỗ
- *
- * GET    /workspaces/:workspaceId/members             → Danh sách thành viên
- *   - Trả về mảng member kèm thông tin user
- *   - Sắp xếp theo thời gian tham gia
- *
- * PATCH  /workspaces/:workspaceId/members/:userId     → Đổi role thành viên
- *   - Body: { role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'GUEST' }
- *   - Bảo vệ: không cho đổi role OWNER cuối cùng
- *
- * DELETE /workspaces/:workspaceId/members/:userId     → Xóa thành viên
- *   - Bảo vệ: không cho xóa OWNER cuối cùng
- *
- * === New Invite Endpoints ===
- *
- * GET    /workspaces/:workspaceId/members/search?type=phone&value=xxx
- *        /workspaces/:workspaceId/members/search?type=name&value=xxx
- *   - Tìm user theo phone hoặc name
- *   - Trả về user candidates để chọn mời
- *
- * POST   /workspaces/:workspaceId/members/invite-by-phone
- *   - Body: { phoneNumber: string, role?: string }
- *   - Mời user theo số điện thoại
- *
- * POST   /workspaces/:workspaceId/members/invite-by-name
- *   - Body: { userId: string, role?: string }
- *   - Mời user đã search theo name
- *
- * POST   /workspaces/:workspaceId/invite-link
- *   - Tạo invite link (kèm QR code data)
- *
- * POST   /workspaces/:workspaceId/join-by-link
- *   - Body: { userId: string, role?: string }
- *   - Join workspace từ link
- */
 @Controller('workspaces/:workspaceId/members')
 @UseGuards(JwtAuthGuard)
 export class WorkspaceMemberController {

@@ -26,12 +26,6 @@ export class WorkspaceMemberService {
     private notificationService: NotificationService,
   ) {}
 
-  /**
-   * Thêm thành viên vào workspace
-   * - Kiểm tra workspace tồn tại, user tồn tại
-   * - Kiểm tra user chưa là thành viên
-   * - Kiểm tra chưa vượt quá giới hạn thành viên
-   */
   async addMember(workspaceId: string, dto: AddMemberDto) {
     const workspace = await this.workspaceRepo.findOne({
       where: { workspaceId },
@@ -62,7 +56,6 @@ export class WorkspaceMemberService {
     });
     const result = await this.memberRepo.save(member);
 
-    // Send notification to the invited user
     await this.notificationService.createAndEmit({
       userId: dto.userId,
       type: 'group_invite',
@@ -78,10 +71,6 @@ export class WorkspaceMemberService {
     return result;
   }
 
-  /**
-   * Lấy tất cả thành viên của workspace
-   * - Kèm thông tin user (avatar, name, email)
-   */
   async findAllByWorkspace(workspaceId: string) {
     return this.memberRepo.find({
       where: { workspace: { workspaceId } },
@@ -90,10 +79,6 @@ export class WorkspaceMemberService {
     });
   }
 
-  /**
-   * Cập nhật role thành viên
-   * - Không cho phép đổi role của OWNER cuối cùng
-   */
   async updateRole(
     workspaceId: string,
     userId: string,
@@ -121,10 +106,6 @@ export class WorkspaceMemberService {
     return this.memberRepo.save(member);
   }
 
-  /**
-   * Xóa thành viên khỏi workspace
-   * - Không cho phép xóa OWNER cuối cùng
-   */
   async removeMember(workspaceId: string, userId: string) {
     const member = await this.memberRepo.findOne({
       where: { workspace: { workspaceId }, user: { userId } },
@@ -143,27 +124,18 @@ export class WorkspaceMemberService {
     return this.memberRepo.remove(member);
   }
 
-  /**
-   * Tìm user theo phone number
-   */
   async findUserByPhone(phoneNumber: string) {
     return this.userRepo.findOne({
       where: { phoneNumber },
     });
   }
 
-  /**
-   * Tìm user theo tên (full name)
-   */
   async findUsersByName(fullName: string) {
     return this.userRepo.find({
       where: { fullName: Like(`%${fullName}%`) },
     });
   }
 
-  /**
-   * Join workspace bằng invite link
-   */
   async joinByInviteLink(workspaceId: string, userId: string, role: WorkspaceRole = WorkspaceRole.MEMBER) {
     const workspace = await this.workspaceRepo.findOne({
       where: { workspaceId },

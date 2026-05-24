@@ -58,6 +58,18 @@ export class UserSettingsService {
       wallpaper: '',
       fontFamily: 'Inter',
       accentColor: '#3B82F6',
+      smartEmotionDetection: false,
+      autoWorkflowSuggestions: true,
+      aiMemoryEnabled: true,
+      enabledAgents: [
+        'core_assistant',
+        'task_agent',
+        'deadline_agent',
+        'sprint_summary',
+        'document_agent',
+        'knowledge_search',
+        'workspace_agent',
+      ],
     });
     return await this.settingsRepository.save(defaultSettings);
   }
@@ -90,6 +102,20 @@ export class UserSettingsService {
     }
     if (updateUserSettingsDto.wallpaper !== undefined) {
       settings.wallpaper = updateUserSettingsDto.wallpaper;
+    }
+    if (updateUserSettingsDto.smartEmotionDetection !== undefined) {
+      settings.smartEmotionDetection =
+        updateUserSettingsDto.smartEmotionDetection;
+    }
+    if (updateUserSettingsDto.autoWorkflowSuggestions !== undefined) {
+      settings.autoWorkflowSuggestions =
+        updateUserSettingsDto.autoWorkflowSuggestions;
+    }
+    if (updateUserSettingsDto.aiMemoryEnabled !== undefined) {
+      settings.aiMemoryEnabled = updateUserSettingsDto.aiMemoryEnabled;
+    }
+    if (updateUserSettingsDto.enabledAgents !== undefined) {
+      settings.enabledAgents = updateUserSettingsDto.enabledAgents;
     }
 
     const savedSettings = await this.settingsRepository.save(settings);

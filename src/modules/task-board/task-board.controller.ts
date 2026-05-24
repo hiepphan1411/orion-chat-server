@@ -13,27 +13,6 @@ import { CreateTaskBoardDto } from './dto/create-task-board.dto';
 import { UpdateTaskBoardDto } from './dto/update-task-board.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
-/**
- * API Task Board
- *
- * POST   /workspaces/:workspaceId/boards             → Tạo board mới
- *   - Body: { boardName, description?, backgroundColor?, icon? }
- *   - Tự động tạo 4 columns mặc định: To Do, In Progress, Review, Done
- *   - Trả về board kèm columns
- *
- * GET    /workspaces/:workspaceId/boards             → Danh sách boards trong workspace
- *   - Trả về mảng board kèm columns
- *   - Sắp xếp theo ngày tạo (mới nhất trước)
- *
- * GET    /workspaces/:workspaceId/boards/:boardId    → Chi tiết board
- *   - Trả về board kèm columns (sắp xếp theo order) và tasks
- *
- * PATCH  /workspaces/:workspaceId/boards/:boardId    → Cập nhật board
- *   - Body: bất kỳ field nào (boardName, description, backgroundColor, icon)
- *
- * DELETE /workspaces/:workspaceId/boards/:boardId    → Xóa board
- *   - Cascade xóa columns, tasks
- */
 @Controller('workspaces/:workspaceId/boards')
 @UseGuards(JwtAuthGuard)
 export class TaskBoardController {

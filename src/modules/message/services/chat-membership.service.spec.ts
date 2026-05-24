@@ -11,6 +11,10 @@ describe('ChatMembershipService', () => {
     findOne: jest.fn(),
   };
 
+  const groupConversationRepo = {
+    findOne: jest.fn(),
+  };
+
   let service: ChatMembershipService;
 
   beforeEach(() => {
@@ -18,6 +22,7 @@ describe('ChatMembershipService', () => {
     service = new ChatMembershipService(
       conversationRepo as any,
       participantRepo as any,
+      groupConversationRepo as any,
     );
   });
 
@@ -29,6 +34,10 @@ describe('ChatMembershipService', () => {
     participantRepo.findOne.mockResolvedValue({
       conversationId: 'conv-1',
       userId: 'user-1',
+    });
+    groupConversationRepo.findOne.mockResolvedValue({
+      conversationId: 'conv-1',
+      isDissolved: false,
     });
 
     const result = await service.assertConversationMember('user-1', 'conv-1');
@@ -51,6 +60,10 @@ describe('ChatMembershipService', () => {
     conversationRepo.findOne.mockResolvedValue({
       conversationId: 'conv-1',
       type: ConversationType.GROUP,
+    });
+    groupConversationRepo.findOne.mockResolvedValue({
+      conversationId: 'conv-1',
+      isDissolved: false,
     });
     participantRepo.findOne.mockResolvedValue(null);
 

@@ -33,6 +33,18 @@ export class UserSettings {
   @Column({ type: 'varchar', nullable: true })
   accentColor: string;
 
+  @Column({ type: 'boolean', default: false })
+  smartEmotionDetection: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  autoWorkflowSuggestions: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  aiMemoryEnabled: boolean;
+
+  @Column('simple-array', { nullable: true })
+  enabledAgents: string[];
+
   @CreateDateColumn()
   createdAt: Date;
 
