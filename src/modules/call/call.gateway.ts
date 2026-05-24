@@ -29,10 +29,9 @@ const activeGroupCalls = new Map<
   {
     initiatorId: string;
     participants: Set<string>;
-    joinedParticipants: Set<string>;
-    participantNames: Map<string, string>;
     conversationId: string;
     callType: string;
+    participantNames: Map<string, string>;
   }
 >(); // callId -> group call info
 
@@ -49,6 +48,25 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private logger = new Logger('CallGateway');
+
+  // gửi sự kiện đến đúng các participant trong group call
+  private emitToGroupParticipants(
+    callId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ) {
+    const groupCall = activeGroupCalls.get(callId);
+    if (!groupCall) {
+      return;
+    }
+
+    for (const participantId of groupCall.participants) {
+      const participantSocketId = onlineUsers.get(participantId);
+      if (participantSocketId) {
+        this.server.to(participantSocketId).emit(event, payload);
+      }
+    }
+  }
 
   constructor(private readonly callService: CallService) {}
 
@@ -466,7 +484,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const initiatorId = client.handshake.query.userId as string;
-      const { conversationId, participantIds, participantNames, callType, initiatorName } = data;
+      const {
+        conversationId,
+        participantIds,
+        participantNames,
+        callType,
+        initiatorName,
+      } = data;
 
       this.logger.log(
         `Group call initiated by ${initiatorId} for ${participantIds.length} participants`,
@@ -478,48 +502,51 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Tạo group call record
       const call: CallDocument = await this.callService.createCall(
         conversationId,
-        callType === 'video' ? CallType.ONE_TO_ONE : CallType.ONE_TO_ONE,
+        CallType.GROUP,
       );
       const groupCallId = call._id.toString();
 
       // Track active group call
+      const participants = new Set([initiatorId, ...participantIds]);
+      const participantNameMap = new Map<string, string>();
+
+      // lưu tên participant để đồng bộ UI giữa web/mobile
+      participantNameMap.set(
+        initiatorId,
+        initiatorName || `User ${initiatorId}`,
+      );
+      for (const id of participantIds) {
+        participantNameMap.set(id, participantNames?.[id] || `User ${id}`);
+      }
+
       activeGroupCalls.set(groupCallId, {
         initiatorId,
-        participants: new Set([initiatorId, ...participantIds]),
-        joinedParticipants: new Set([initiatorId]),
-        participantNames: new Map([
-          [initiatorId, initiatorName],
-          ...participantIds.map(
-            (id) => [id, participantNames?.[id] || `User ${id}`] as [
-              string,
-              string,
-            ],
-          ),
-        ]),
+        participants,
         conversationId,
         callType,
+        participantNames: participantNameMap,
       });
 
       // Prepare participants data - use real names if provided, fallback to generic names
-      const participants = [
+      const participantsPayload = [
         {
           id: initiatorId,
-          name: initiatorName,
+          name: participantNameMap.get(initiatorId) || `User ${initiatorId}`,
           isHost: true,
         },
         ...participantIds.map((id) => ({
           id,
-          name: participantNames?.[id] || `User ${id}`, // Use provided name or fallback
+          name: participantNameMap.get(id) || `User ${id}`,
           isHost: false,
         })),
       ];
 
-      this.logger.log(`Participants data:`, participants);
+      this.logger.log(`Participants data:`, participantsPayload);
 
       // Send call:initiated acknowledgment to initiator
       client.emit('groupcall:initiated', {
         callId: groupCallId,
-        participants,
+        participants: participantsPayload,
       });
 
       // Send incoming call notifications to all participants
@@ -533,8 +560,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
             callType,
             initiatorId,
             initiatorName,
-            participants,
-            participantCount: participants.length,
+            participants: participantsPayload,
+            participantCount: participantsPayload.length,
           });
         }
       }
@@ -558,7 +585,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const userId = client.handshake.query.userId as string;
-      const { callId, userName } = data;
+      const { callId } = data;
 
       const groupCall = activeGroupCalls.get(callId);
       if (!groupCall) {
@@ -569,37 +596,31 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
+      // Add user to participants + lưu tên để broadcast đồng bộ
       groupCall.participants.add(userId);
-      groupCall.joinedParticipants.add(userId);
-      if (userName) {
-        groupCall.participantNames.set(userId, userName);
-      }
+      groupCall.participantNames.set(
+        userId,
+        data.userName ||
+          groupCall.participantNames.get(userId) ||
+          `User ${userId}`,
+      );
 
       this.logger.log(`User ${userId} joined group call ${callId}`);
 
       // Notify all participants that someone joined
-      const participantsList = Array.from(groupCall.joinedParticipants).map(
-        (id) => ({
-          id,
-          name: groupCall.participantNames.get(id) || `User ${id}`,
-          isHost: id === groupCall.initiatorId,
-        }),
-      );
+      const participantsList = Array.from(groupCall.participants).map((id) => ({
+        id,
+        name: groupCall.participantNames.get(id) || `User ${id}`,
+      }));
 
-      for (const participantId of groupCall.joinedParticipants) {
-        if (participantId === userId) continue;
-
-        const participantSocketId = onlineUsers.get(participantId);
-        if (participantSocketId) {
-          this.server.to(participantSocketId).emit('groupcall:participant-joined', {
-            callId,
-            userId,
-            userName: groupCall.participantNames.get(userId) || `User ${userId}`,
-            isHost: userId === groupCall.initiatorId,
-            participants: participantsList,
-          });
-        }
-      }
+      // chỉ broadcast trong nhóm hiện tại
+      this.emitToGroupParticipants(callId, 'groupcall:participant-joined', {
+        callId,
+        userId,
+        userName: groupCall.participantNames.get(userId) || `User ${userId}`,
+        isHost: groupCall.initiatorId === userId,
+        participants: participantsList,
+      });
     } catch (error) {
       this.logger.error('Error joining group call:', error);
       client.emit('groupcall:error', {
@@ -720,19 +741,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      for (const participantId of groupCall.joinedParticipants) {
-        if (participantId === userId) continue;
-
-        const participantSocketId = onlineUsers.get(participantId);
-        if (participantSocketId) {
-          this.server.to(participantSocketId).emit('groupcall:media-toggled', {
-            callId,
-            userId,
-            mediaType,
-            enabled,
-          });
-        }
-      }
+      // chỉ broadcast trong nhóm hiện tại để tránh nhiễu call khác
+      this.emitToGroupParticipants(callId, 'groupcall:media-toggled', {
+        callId,
+        userId,
+        mediaType,
+        enabled,
+      });
     } catch (error) {
       this.logger.error('Error toggling group call media:', error);
     }
@@ -754,23 +769,26 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Remove participant
-      groupCall.joinedParticipants.delete(userId);
+      groupCall.participants.delete(userId);
 
       // Notify remaining participants (not globally)
-      const remainingParticipants = Array.from(groupCall.joinedParticipants);
+      const remainingParticipants = Array.from(groupCall.participants);
       for (const participantId of remainingParticipants) {
         const participantSocketId = onlineUsers.get(participantId);
         if (participantSocketId) {
-          this.server.to(participantSocketId).emit('groupcall:participant-left', {
-            callId,
-            userId,
-            participantName: `User ${userId}`,
-          });
+          this.server
+            .to(participantSocketId)
+            .emit('groupcall:participant-left', {
+              callId,
+              userId,
+              participantName:
+                groupCall.participantNames.get(userId) || `User ${userId}`,
+            });
         }
       }
 
       // If no participants left, cleanup
-      if (groupCall.joinedParticipants.size === 0) {
+      if (groupCall.participants.size === 0) {
         activeGroupCalls.delete(callId);
         await this.callService.endCall(callId);
       }
@@ -824,4 +842,3 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
-
