@@ -26,6 +26,7 @@ import { EpicModule } from './modules/epic/epic.module';
 import { MilestoneModule } from './modules/milestone/milestone.module';
 
 import { WorkspaceMember } from './modules/workspace-member/entities/workspace-member.entity';
+import { WorkspaceJoinRequest } from './modules/workspace-member/entities/workspace-join-request.entity';
 import { Workspace } from './modules/workspace/entities/workspace.entity';
 import { TaskList } from './modules/task-list/entities/task-list.entity';
 import { TaskBoard } from './modules/task-board/entities/task-board.entity';
@@ -110,6 +111,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
         TaskList,
         Workspace,
         WorkspaceMember,
+        WorkspaceJoinRequest,
         BoardColumn,
         Label,
         Report,

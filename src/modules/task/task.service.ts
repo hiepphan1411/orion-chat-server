@@ -123,7 +123,7 @@ export class TaskService {
             type: 'system',
             title: 'Task Assignment',
             body: `You were assigned to task: "${taskTitle}"`,
-            link: `/workspaces/${workspaceId}/boards/${boardId}/tasks/${taskId}`,
+            link: `/work-hub/${workspaceId}/boards/${boardId}?task=${taskId}`,
             metadata: {
               taskId,
               taskTitle,
@@ -133,7 +133,7 @@ export class TaskService {
           });
         }
       }
-    }(saved as any)?.taskId || ''
+    }
 
     return this.findOne(saved.taskId);
   }
@@ -212,7 +212,7 @@ export class TaskService {
               type: 'system',
               title: 'Task Assignment',
               body: `You were assigned to task: "${task.title}"`,
-              link: `/workspaces/${workspaceId}/boards/${task.board.boardId}/tasks/${task.taskId}`,
+              link: `/work-hub/${workspaceId}/boards/${task.board.boardId}?task=${task.taskId}`,
               metadata: {
                 taskId: task.taskId,
                 taskTitle: task.title,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WorkspaceMember } from './entities/workspace-member.entity';
+import { WorkspaceJoinRequest } from './entities/workspace-join-request.entity';
 import { Workspace } from '../workspace/entities/workspace.entity';
 import { User } from '../users/entities/user.entity';
 import { WorkspaceMemberService } from './workspace-member.service';
@@ -9,7 +10,12 @@ import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WorkspaceMember, Workspace, User]),
+    TypeOrmModule.forFeature([
+      WorkspaceMember,
+      WorkspaceJoinRequest,
+      Workspace,
+      User,
+    ]),
     NotificationModule,
   ],
   controllers: [WorkspaceMemberController],

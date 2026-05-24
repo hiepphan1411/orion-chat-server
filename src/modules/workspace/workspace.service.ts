@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
@@ -112,9 +113,49 @@ export class WorkspaceService {
   /**
    * Remove workspace
    */
-  async remove(id: string) {
+  async remove(id: string, actorId?: string) {
+    if (actorId) {
+      const actor = await this.memberRepo.findOne({
+        where: { workspace: { workspaceId: id }, user: { userId: actorId } },
+      });
+      if (actor?.role !== WorkspaceRole.OWNER) {
+        throw new ForbiddenException('Only workspace owner can disband workspace');
+      }
+    }
     const workspace = await this.findOne(id);
     return this.workspaceRepo.remove(workspace);
+  }
+
+  async transferOwner(workspaceId: string, targetUserId: string, actorId: string) {
+    const actor = await this.memberRepo.findOne({
+      where: {
+        workspace: { workspaceId },
+        user: { userId: actorId },
+      },
+      relations: ['user'],
+    });
+    if (actor?.role !== WorkspaceRole.OWNER) {
+      throw new ForbiddenException('Only workspace owner can transfer ownership');
+    }
+
+    const target = await this.memberRepo.findOne({
+      where: {
+        workspace: { workspaceId },
+        user: { userId: targetUserId },
+      },
+      relations: ['user'],
+    });
+    if (!target) throw new NotFoundException('Target member not found');
+
+    actor.role = WorkspaceRole.ADMIN;
+    target.role = WorkspaceRole.OWNER;
+    await this.memberRepo.save([actor, target]);
+
+    const workspace = await this.findOne(workspaceId);
+    workspace.owner = target.user;
+    await this.workspaceRepo.save(workspace);
+
+    return this.findOne(workspaceId);
   }
 
   /**
