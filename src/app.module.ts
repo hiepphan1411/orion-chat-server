@@ -81,6 +81,7 @@ import { NotificationSettingsModule } from './modules/notification-settings/noti
 import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
 import { UserDevicesModule } from './modules/user-devices/user-devices.module';
 import { GroupsModule } from './modules/groups/groups.module';
+import { StreamVideoModule } from './modules/stream-video/stream-video.module';
 import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
 import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
 import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
@@ -199,6 +200,7 @@ import { UserDevices } from './modules/user-devices/entities/user-devices.entity
     PrivacySettingsModule,
     UserDevicesModule,
     GroupsModule,
+    StreamVideoModule,
   ],
 })
 export class AppModule {}

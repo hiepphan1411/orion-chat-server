@@ -896,10 +896,18 @@ export class ConversationController {
       throw new BadRequestException('User ID is required');
     }
 
-    return this.conversationService.deleteConversationForUser(
+    const result = await this.conversationService.deleteConversationForUser(
       conversationId,
       user.userId,
     );
+
+    this.chatGateway.emitConversationDeleted({
+      conversationId,
+      userId: String(user.userId),
+      deletedAt: new Date().toISOString(),
+    });
+
+    return result;
   }
 
   /**

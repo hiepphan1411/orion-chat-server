@@ -24,7 +24,17 @@ import { CallDocument } from './call.schema';
 const onlineUsers = new Map<string, string>(); // userId -> socketId
 const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId}
 // Group call tracking
-const activeGroupCalls = new Map<string, { initiatorId: string; participants: Set<string>; conversationId: string; callType: string }>(); // callId -> group call info
+const activeGroupCalls = new Map<
+  string,
+  {
+    initiatorId: string;
+    participants: Set<string>;
+    joinedParticipants: Set<string>;
+    participantNames: Map<string, string>;
+    conversationId: string;
+    callType: string;
+  }
+>(); // callId -> group call info
 
 @WebSocketGateway({
   cors: {
@@ -476,6 +486,16 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       activeGroupCalls.set(groupCallId, {
         initiatorId,
         participants: new Set([initiatorId, ...participantIds]),
+        joinedParticipants: new Set([initiatorId]),
+        participantNames: new Map([
+          [initiatorId, initiatorName],
+          ...participantIds.map(
+            (id) => [id, participantNames?.[id] || `User ${id}`] as [
+              string,
+              string,
+            ],
+          ),
+        ]),
         conversationId,
         callType,
       });
@@ -532,12 +552,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Group call event 2: join group call
   @SubscribeMessage('groupcall:join')
   handleGroupCallJoin(
-    @MessageBody() data: { callId: string; conversationId: string },
+    @MessageBody()
+    data: { callId: string; conversationId: string; userName?: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
       const userId = client.handshake.query.userId as string;
-      const { callId } = data;
+      const { callId, userName } = data;
 
       const groupCall = activeGroupCalls.get(callId);
       if (!groupCall) {
@@ -548,22 +569,37 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Add user to participants
       groupCall.participants.add(userId);
+      groupCall.joinedParticipants.add(userId);
+      if (userName) {
+        groupCall.participantNames.set(userId, userName);
+      }
 
       this.logger.log(`User ${userId} joined group call ${callId}`);
 
       // Notify all participants that someone joined
-      const participantsList = Array.from(groupCall.participants).map((id) => ({
-        id,
-        name: `User ${id}`,
-      }));
+      const participantsList = Array.from(groupCall.joinedParticipants).map(
+        (id) => ({
+          id,
+          name: groupCall.participantNames.get(id) || `User ${id}`,
+          isHost: id === groupCall.initiatorId,
+        }),
+      );
 
-      this.server.emit('groupcall:participant-joined', {
-        callId,
-        userId,
-        participants: participantsList,
-      });
+      for (const participantId of groupCall.joinedParticipants) {
+        if (participantId === userId) continue;
+
+        const participantSocketId = onlineUsers.get(participantId);
+        if (participantSocketId) {
+          this.server.to(participantSocketId).emit('groupcall:participant-joined', {
+            callId,
+            userId,
+            userName: groupCall.participantNames.get(userId) || `User ${userId}`,
+            isHost: userId === groupCall.initiatorId,
+            participants: participantsList,
+          });
+        }
+      }
     } catch (error) {
       this.logger.error('Error joining group call:', error);
       client.emit('groupcall:error', {
@@ -684,13 +720,19 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Broadcast to all participants
-      this.server.emit('groupcall:media-toggled', {
-        callId,
-        userId,
-        mediaType,
-        enabled,
-      });
+      for (const participantId of groupCall.joinedParticipants) {
+        if (participantId === userId) continue;
+
+        const participantSocketId = onlineUsers.get(participantId);
+        if (participantSocketId) {
+          this.server.to(participantSocketId).emit('groupcall:media-toggled', {
+            callId,
+            userId,
+            mediaType,
+            enabled,
+          });
+        }
+      }
     } catch (error) {
       this.logger.error('Error toggling group call media:', error);
     }
@@ -712,10 +754,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Remove participant
-      groupCall.participants.delete(userId);
+      groupCall.joinedParticipants.delete(userId);
 
       // Notify remaining participants (not globally)
-      const remainingParticipants = Array.from(groupCall.participants);
+      const remainingParticipants = Array.from(groupCall.joinedParticipants);
       for (const participantId of remainingParticipants) {
         const participantSocketId = onlineUsers.get(participantId);
         if (participantSocketId) {
@@ -728,7 +770,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // If no participants left, cleanup
-      if (groupCall.participants.size === 0) {
+      if (groupCall.joinedParticipants.size === 0) {
         activeGroupCalls.delete(callId);
         await this.callService.endCall(callId);
       }

@@ -402,6 +402,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
   }
 
+  emitConversationDeleted(payload: {
+    conversationId: string;
+    userId: string;
+    deletedAt: string;
+  }) {
+    this.server.to(`user:${payload.userId}`).emit('conversation:deleted', {
+      conversationId: payload.conversationId,
+      userId: payload.userId,
+      deletedAt: payload.deletedAt,
+    });
+  }
+
   /**
    * Emit khi tạo group mới - gửi tới tất cả thành viên để họ refresh conversations
    */
