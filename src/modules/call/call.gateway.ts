@@ -24,7 +24,16 @@ import { CallDocument } from './call.schema';
 const onlineUsers = new Map<string, string>(); // userId -> socketId
 const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId}
 // Group call tracking
-const activeGroupCalls = new Map<string, { initiatorId: string; participants: Set<string>; conversationId: string; callType: string }>(); // callId -> group call info
+const activeGroupCalls = new Map<
+  string,
+  {
+    initiatorId: string;
+    participants: Set<string>;
+    conversationId: string;
+    callType: string;
+    participantNames: Map<string, string>;
+  }
+>(); // callId -> group call info
 
 @WebSocketGateway({
   cors: {
@@ -39,6 +48,25 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private logger = new Logger('CallGateway');
+
+  // gửi sự kiện đến đúng các participant trong group call
+  private emitToGroupParticipants(
+    callId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ) {
+    const groupCall = activeGroupCalls.get(callId);
+    if (!groupCall) {
+      return;
+    }
+
+    for (const participantId of groupCall.participants) {
+      const participantSocketId = onlineUsers.get(participantId);
+      if (participantSocketId) {
+        this.server.to(participantSocketId).emit(event, payload);
+      }
+    }
+  }
 
   constructor(private readonly callService: CallService) {}
 
@@ -456,7 +484,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const initiatorId = client.handshake.query.userId as string;
-      const { conversationId, participantIds, participantNames, callType, initiatorName } = data;
+      const {
+        conversationId,
+        participantIds,
+        participantNames,
+        callType,
+        initiatorName,
+      } = data;
 
       this.logger.log(
         `Group call initiated by ${initiatorId} for ${participantIds.length} participants`,
@@ -468,38 +502,51 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Tạo group call record
       const call: CallDocument = await this.callService.createCall(
         conversationId,
-        callType === 'video' ? CallType.ONE_TO_ONE : CallType.ONE_TO_ONE,
+        CallType.GROUP,
       );
       const groupCallId = call._id.toString();
 
       // Track active group call
+      const participants = new Set([initiatorId, ...participantIds]);
+      const participantNameMap = new Map<string, string>();
+
+      // lưu tên participant để đồng bộ UI giữa web/mobile
+      participantNameMap.set(
+        initiatorId,
+        initiatorName || `User ${initiatorId}`,
+      );
+      for (const id of participantIds) {
+        participantNameMap.set(id, participantNames?.[id] || `User ${id}`);
+      }
+
       activeGroupCalls.set(groupCallId, {
         initiatorId,
-        participants: new Set([initiatorId, ...participantIds]),
+        participants,
         conversationId,
         callType,
+        participantNames: participantNameMap,
       });
 
       // Prepare participants data - use real names if provided, fallback to generic names
-      const participants = [
+      const participantsPayload = [
         {
           id: initiatorId,
-          name: initiatorName,
+          name: participantNameMap.get(initiatorId) || `User ${initiatorId}`,
           isHost: true,
         },
         ...participantIds.map((id) => ({
           id,
-          name: participantNames?.[id] || `User ${id}`, // Use provided name or fallback
+          name: participantNameMap.get(id) || `User ${id}`,
           isHost: false,
         })),
       ];
 
-      this.logger.log(`Participants data:`, participants);
+      this.logger.log(`Participants data:`, participantsPayload);
 
       // Send call:initiated acknowledgment to initiator
       client.emit('groupcall:initiated', {
         callId: groupCallId,
-        participants,
+        participants: participantsPayload,
       });
 
       // Send incoming call notifications to all participants
@@ -513,8 +560,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
             callType,
             initiatorId,
             initiatorName,
-            participants,
-            participantCount: participants.length,
+            participants: participantsPayload,
+            participantCount: participantsPayload.length,
           });
         }
       }
@@ -532,7 +579,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Group call event 2: join group call
   @SubscribeMessage('groupcall:join')
   handleGroupCallJoin(
-    @MessageBody() data: { callId: string; conversationId: string },
+    @MessageBody()
+    data: { callId: string; conversationId: string; userName?: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
@@ -548,20 +596,29 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Add user to participants
+      // Add user to participants + lưu tên để broadcast đồng bộ
       groupCall.participants.add(userId);
+      groupCall.participantNames.set(
+        userId,
+        data.userName ||
+          groupCall.participantNames.get(userId) ||
+          `User ${userId}`,
+      );
 
       this.logger.log(`User ${userId} joined group call ${callId}`);
 
       // Notify all participants that someone joined
       const participantsList = Array.from(groupCall.participants).map((id) => ({
         id,
-        name: `User ${id}`,
+        name: groupCall.participantNames.get(id) || `User ${id}`,
       }));
 
-      this.server.emit('groupcall:participant-joined', {
+      // chỉ broadcast trong nhóm hiện tại
+      this.emitToGroupParticipants(callId, 'groupcall:participant-joined', {
         callId,
         userId,
+        userName: groupCall.participantNames.get(userId) || `User ${userId}`,
+        isHost: groupCall.initiatorId === userId,
         participants: participantsList,
       });
     } catch (error) {
@@ -684,8 +741,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Broadcast to all participants
-      this.server.emit('groupcall:media-toggled', {
+      // chỉ broadcast trong nhóm hiện tại để tránh nhiễu call khác
+      this.emitToGroupParticipants(callId, 'groupcall:media-toggled', {
         callId,
         userId,
         mediaType,
@@ -719,11 +776,14 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for (const participantId of remainingParticipants) {
         const participantSocketId = onlineUsers.get(participantId);
         if (participantSocketId) {
-          this.server.to(participantSocketId).emit('groupcall:participant-left', {
-            callId,
-            userId,
-            participantName: `User ${userId}`,
-          });
+          this.server
+            .to(participantSocketId)
+            .emit('groupcall:participant-left', {
+              callId,
+              userId,
+              participantName:
+                groupCall.participantNames.get(userId) || `User ${userId}`,
+            });
         }
       }
 
@@ -782,4 +842,3 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
-
