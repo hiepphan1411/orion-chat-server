@@ -54,6 +54,22 @@ export class FriendsService {
     );
   }
 
+  private async getBlockedIdSet(userId: string): Promise<Set<string>> {
+    const rows = await this.friendshipRepo.find({
+      where: [
+        { userOne: { userId }, status: FriendshipStatus.BLOCKED },
+        { userTwo: { userId }, status: FriendshipStatus.BLOCKED },
+      ],
+      relations: ['userOne', 'userTwo'],
+    });
+
+    return new Set(
+      rows.map((row) =>
+        row.userOne.userId === userId ? row.userTwo.userId : row.userOne.userId,
+      ),
+    );
+  }
+
   async getFriends(userId: string) {
     const rows = await this.friendshipRepo.find({
       where: [
@@ -80,24 +96,25 @@ export class FriendsService {
     const keyword = query.trim();
     if (!keyword) return [];
 
-    const friendIds = await this.getFriendIdSet(userId);
+    const [friendIds, blockedIds] = await Promise.all([
+      this.getFriendIdSet(userId),
+      this.getBlockedIdSet(userId),
+    ]);
 
     const users = await this.userRepo
       .createQueryBuilder('user')
       .where('user.userId != :userId', { userId })
-      .andWhere(
-        '(user.fullName ILIKE :keyword OR user.phoneNumber ILIKE :keyword)',
-        {
-          keyword: `%${keyword}%`,
-        },
-      )
+      .andWhere('user.phoneNumber = :phone', { phone: keyword })
       .orderBy('user.isOnline', 'DESC')
       .addOrderBy('user.fullName', 'ASC')
-      .take(10)
+      .take(5)
       .getMany();
 
     return users
-      .filter((user) => !friendIds.has(user.userId))
+      .filter(
+        (user) =>
+          !friendIds.has(user.userId) && !blockedIds.has(user.userId),
+      )
       .map((user) => ({
         id: user.userId,
         fullName: user.fullName,

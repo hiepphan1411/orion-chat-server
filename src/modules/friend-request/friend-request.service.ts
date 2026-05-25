@@ -10,7 +10,10 @@ import {
   FriendRequestStatus,
 } from './entities/friend-request.entity';
 import { User } from '../users/entities/user.entity';
-import { Friendship } from '../friendship/entities/friendship.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from '../friendship/entities/friendship.entity';
 import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
@@ -51,6 +54,9 @@ export class FriendRequestService {
     });
 
     if (existingFriendship) {
+      if (existingFriendship.status === FriendshipStatus.BLOCKED) {
+        throw new BadRequestException('User is blocked');
+      }
       throw new BadRequestException('Already friends');
     }
 
