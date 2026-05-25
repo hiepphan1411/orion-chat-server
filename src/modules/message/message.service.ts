@@ -895,6 +895,8 @@ export class MessageService {
         return MessageType.VOICE_MESSAGE;
       case MessageType.STICKER:
         return MessageType.STICKER;
+      case MessageType.SYSTEM:
+        return MessageType.SYSTEM;
       default:
         return MessageType.TEXT;
     }
