@@ -141,7 +141,7 @@ export class ConversationController {
    *
    * Response fields:
    * - conversationId
-   * - type: "PRIVATE" TODO: luôn là private conversation
+   * - type: "PRIVATE"
    * - participants: 2 users với full info (userId, fullName, avatarUrl, etc)
    * - lastMessage: Tin nhắn cuối (nếu có)
    * - blockStatus: Thông tin block (quan trọng cho security)

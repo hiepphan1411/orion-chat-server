@@ -54,6 +54,7 @@ export class UserSettingsService {
     const defaultSettings = this.settingsRepository.create({
       userId,
       theme: 'light',
+      appearanceColor: 'green',
       fontSize: 16,
       wallpaper: '',
       fontFamily: 'Inter',
@@ -90,6 +91,9 @@ export class UserSettingsService {
     // Explicitly assign each field
     if (updateUserSettingsDto.theme !== undefined) {
       settings.theme = updateUserSettingsDto.theme;
+    }
+    if (updateUserSettingsDto.appearanceColor !== undefined) {
+      settings.appearanceColor = updateUserSettingsDto.appearanceColor;
     }
     if (updateUserSettingsDto.fontSize !== undefined) {
       settings.fontSize = updateUserSettingsDto.fontSize;

@@ -763,7 +763,7 @@ export class ConversationService {
     actorUserId: string,
     payload: CreateConversationMessagePayload,
   ): Promise<MessageDocument> {
-    // ✅ Verify user là member của conversation (throws nếu không phải member)
+    // Verify user là member của conversation (throws nếu không phải member)
 
     const _membership = await this.requireMembership(
       conversationId,
@@ -792,7 +792,7 @@ export class ConversationService {
       }
     }
 
-    // ✅ Kiểm tra trạng thái chặn của conversation
+    // Kiểm tra trạng thái chặn của conversation
     const blockStatus = await this.getConversationBlockStatus(conversationId);
 
     // Nếu conversation bị chặn

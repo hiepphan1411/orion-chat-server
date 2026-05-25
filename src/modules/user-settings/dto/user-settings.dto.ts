@@ -18,6 +18,10 @@ export class CreateUserSettingsDto {
   theme?: string;
 
   @IsOptional()
+  @IsString()
+  appearanceColor?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(12)
   @Max(24)
@@ -59,6 +63,10 @@ export class UpdateUserSettingsDto {
   theme?: string;
 
   @IsOptional()
+  @IsString()
+  appearanceColor?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(12)
   @Max(24)
@@ -98,6 +106,7 @@ export class UserSettingsResponseDto {
   id: string;
   userId: string;
   theme: string;
+  appearanceColor: string;
   fontSize: number;
   wallpaper: string;
   fontFamily: string;
