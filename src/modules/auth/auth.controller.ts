@@ -145,10 +145,20 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtSessionGuard)
   logout(
-    @Request() req: { user: { phoneNumber: string; userId: string } },
+    @Request()
+    req: {
+      user: { phoneNumber: string; userId: string };
+      headers: Record<string, string | string[] | undefined>;
+    },
     @Body() body?: { platform?: string },
   ) {
-    return this.authService.logout(req.user.userId, body?.platform);
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    const token = headerValue?.startsWith('Bearer ')
+      ? headerValue.slice('Bearer '.length)
+      : undefined;
+
+    return this.authService.logout(req.user.userId, body?.platform, token);
   }
 
   @Post('logout-with-token')
@@ -157,7 +167,11 @@ export class AuthController {
     try {
       /**eslint-disable-next-line */
       const decoded = this.jwtService.verify<{ userId: string }>(body.token);
-      return this.authService.logout(decoded.userId, body?.platform);
+      return this.authService.logout(
+        decoded.userId,
+        body?.platform,
+        body.token,
+      );
     } catch (error) {
       this.logger.warn('Invalid token in logout-with-token:', error);
       throw new BadRequestException('Token không hợp lệ');

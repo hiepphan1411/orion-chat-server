@@ -26,7 +26,11 @@ const PRESENCE_SWEEP_INTERVAL_MS = 30000;
   namespace: '/presence',
 })
 export class PresenceGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   @WebSocketServer()
   server: Server;
@@ -51,6 +55,7 @@ export class PresenceGateway
     try {
       const userId = client.handshake.query.userId as string;
       const platform = (client.handshake.query.platform as string) || 'web';
+      const sessionToken = client.handshake.auth?.token as string | undefined;
 
       if (!userId) {
         this.logger.warn(`Client ${client.id} connected without userId`);
@@ -71,6 +76,10 @@ export class PresenceGateway
 
       // Join platform-specific room so only same platform receives conflict events
       void client.join(`user:${userId}:${platform}`);
+
+      if (sessionToken) {
+        client.data.sessionToken = sessionToken;
+      }
 
       console.log(
         `[handleConnection] Socket ${client.id} joined rooms: user:${userId}, user:${userId}:${platform}`,
@@ -108,7 +117,9 @@ export class PresenceGateway
       if (socketIds.size === 0) {
         onlineUsers.delete(userId);
         userLastSeen.set(userId, Date.now());
-        this.logger.log(`Presence disconnected: ${userId}. Online: ${onlineUsers.size}`);
+        this.logger.log(
+          `Presence disconnected: ${userId}. Online: ${onlineUsers.size}`,
+        );
         client.broadcast.emit('presence:user-offline', { userId });
       } else {
         this.logger.log(
@@ -283,5 +294,41 @@ export class PresenceGateway
       // Set up one-time listener for response
       this.server.on('session:conflict-response', responseHandler);
     });
+  }
+
+  emitSessionConflictToToken(
+    userId: string,
+    platform: string,
+    token: string,
+    payload: {
+      message: string;
+      oldPlatform: string;
+      newPlatform: string;
+      timestamp: string;
+    },
+  ): boolean {
+    try {
+      const room = this.server?.sockets?.adapter?.rooms?.get(
+        `user:${userId}:${platform}`,
+      );
+
+      if (!room || room.size === 0) {
+        return false;
+      }
+
+      let emitted = false;
+      for (const socketId of room) {
+        const socket = this.server.sockets.sockets.get(socketId);
+        if (socket?.data?.sessionToken === token) {
+          socket.emit('session:conflict', payload);
+          emitted = true;
+        }
+      }
+
+      return emitted;
+    } catch (error) {
+      this.logger.error('Error emitting session conflict to token:', error);
+      return false;
+    }
   }
 }
