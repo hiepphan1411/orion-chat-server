@@ -20,6 +20,11 @@ import {
 import { CallActionDto, ToggleMediaDto } from './dto/call-action.dto';
 import { CallDocument } from './call.schema';
 
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Message, MessageDocument } from '../message/message.schema';
+import { ChatGateway } from '../message/chat.gateway';
+
 // map để tracking user online và socketId
 const onlineUsers = new Map<string, string>(); // userId -> socketId
 const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId}
@@ -32,6 +37,8 @@ const activeGroupCalls = new Map<
     conversationId: string;
     callType: string;
     participantNames: Map<string, string>;
+    participantAvatars: Map<string, string>;
+    startTime: number;
   }
 >(); // callId -> group call info
 
@@ -68,7 +75,53 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  constructor(private readonly callService: CallService) {}
+  constructor(
+    private readonly callService: CallService,
+    @InjectModel(Message.name)
+    private readonly messageModel: Model<MessageDocument>,
+    private readonly chatGateway: ChatGateway,
+  ) {}
+
+  private async completeActiveCallMessage(callId: string, duration: number) {
+    try {
+      this.logger.log(`Completing active call message for callId ${callId} with duration ${duration}`);
+      // Find the message with the callId and "active" status
+      const message = await this.messageModel.findOne({
+        'callData.callId': callId,
+        'callData.callStatus': 'active',
+      });
+
+      if (message && message.callData) {
+        message.callData.callStatus = 'completed';
+        message.callData.duration = duration;
+        await message.save();
+        this.logger.log(`Successfully completed active call message ${message._id}`);
+
+        // Phát tín hiệu update tin nhắn để UI các client đổi từ "Cuộc gọi nhóm đang diễn ra" -> "Cuộc gọi nhóm đã kết thúc"
+        this.chatGateway.emitNewMessage({
+          conversationId: message.conversationId,
+          messageId: message._id.toString(),
+          senderBy: message.senderBy,
+          content: message.content || '',
+          messageType: message.messageType || 'CALL',
+          createdAt: message.createdAt,
+          clientMessageId: message.clientMessageId,
+          messageStatus: message.messageStatus,
+          callData: {
+            callType: message.callData.callType as 'audio' | 'video',
+            callStatus: 'completed',
+            duration: duration,
+            isInitiator: message.callData.isInitiator,
+            wasRejected: message.callData.wasRejected,
+          },
+        });
+      } else {
+        this.logger.warn(`No active call message found with callId ${callId}`);
+      }
+    } catch (err) {
+      this.logger.error(`Error completing active call message:`, err);
+    }
+  }
 
   // xử lý khi client connect
   handleConnection(client: Socket) {
@@ -477,8 +530,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId: string;
       participantIds: string[];
       participantNames?: Record<string, string>; // Map of userId -> userName
+      participantAvatars?: Record<string, string>; // Map of userId -> userAvatar
       callType: string;
       initiatorName: string;
+      initiatorAvatar?: string;
     },
     @ConnectedSocket() client: Socket,
   ) {
@@ -488,8 +543,10 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         conversationId,
         participantIds,
         participantNames,
+        participantAvatars,
         callType,
         initiatorName,
+        initiatorAvatar,
       } = data;
 
       this.logger.log(
@@ -509,14 +566,20 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Track active group call
       const participants = new Set([initiatorId, ...participantIds]);
       const participantNameMap = new Map<string, string>();
+      const participantAvatarMap = new Map<string, string>();
 
       // lưu tên participant để đồng bộ UI giữa web/mobile
       participantNameMap.set(
         initiatorId,
         initiatorName || `User ${initiatorId}`,
       );
+      participantAvatarMap.set(
+        initiatorId,
+        initiatorAvatar || '',
+      );
       for (const id of participantIds) {
         participantNameMap.set(id, participantNames?.[id] || `User ${id}`);
+        participantAvatarMap.set(id, participantAvatars?.[id] || '');
       }
 
       activeGroupCalls.set(groupCallId, {
@@ -525,6 +588,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         conversationId,
         callType,
         participantNames: participantNameMap,
+        participantAvatars: participantAvatarMap,
+        startTime: Date.now(),
       });
 
       // Prepare participants data - use real names if provided, fallback to generic names
@@ -532,11 +597,13 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         {
           id: initiatorId,
           name: participantNameMap.get(initiatorId) || `User ${initiatorId}`,
+          avatar: participantAvatarMap.get(initiatorId) || '',
           isHost: true,
         },
         ...participantIds.map((id) => ({
           id,
           name: participantNameMap.get(id) || `User ${id}`,
+          avatar: participantAvatarMap.get(id) || '',
           isHost: false,
         })),
       ];
@@ -580,7 +647,12 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('groupcall:join')
   handleGroupCallJoin(
     @MessageBody()
-    data: { callId: string; conversationId: string; userName?: string },
+    data: {
+      callId: string;
+      conversationId: string;
+      userName?: string;
+      userAvatar?: string;
+    },
     @ConnectedSocket() client: Socket,
   ) {
     try {
@@ -605,12 +677,23 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           `User ${userId}`,
       );
 
+      if (!groupCall.participantAvatars) {
+        groupCall.participantAvatars = new Map<string, string>();
+      }
+      groupCall.participantAvatars.set(
+        userId,
+        data.userAvatar ||
+          groupCall.participantAvatars.get(userId) ||
+          '',
+      );
+
       this.logger.log(`User ${userId} joined group call ${callId}`);
 
       // Notify all participants that someone joined
       const participantsList = Array.from(groupCall.participants).map((id) => ({
         id,
         name: groupCall.participantNames.get(id) || `User ${id}`,
+        avatar: groupCall.participantAvatars.get(id) || '',
       }));
 
       // chỉ broadcast trong nhóm hiện tại
@@ -618,6 +701,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         callId,
         userId,
         userName: groupCall.participantNames.get(userId) || `User ${userId}`,
+        userAvatar: groupCall.participantAvatars.get(userId) || '',
         isHost: groupCall.initiatorId === userId,
         participants: participantsList,
       });
@@ -789,8 +873,12 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // If no participants left, cleanup
       if (groupCall.participants.size === 0) {
+        const duration = groupCall.startTime
+          ? Math.max(0, Math.floor((Date.now() - groupCall.startTime) / 1000))
+          : 0;
         activeGroupCalls.delete(callId);
         await this.callService.endCall(callId);
+        await this.completeActiveCallMessage(callId, duration);
       }
     } catch (error) {
       this.logger.error('Error leaving group call:', error);
@@ -835,8 +923,12 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Cleanup
+      const duration = groupCall.startTime
+        ? Math.max(0, Math.floor((Date.now() - groupCall.startTime) / 1000))
+        : 0;
       activeGroupCalls.delete(callId);
       await this.callService.endCall(callId);
+      await this.completeActiveCallMessage(callId, duration);
     } catch (error) {
       this.logger.error('Error ending group call:', error);
     }
