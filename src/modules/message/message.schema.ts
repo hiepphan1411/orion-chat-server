@@ -120,20 +120,22 @@ export class Message {
       },
       callStatus: {
         type: String,
-        enum: ['completed', 'missed', 'declined'],
+        enum: ['completed', 'missed', 'declined', 'active'],
       },
       duration: { type: Number },
       isInitiator: { type: Boolean },
       wasRejected: { type: Boolean },
+      callId: { type: String },
     },
     default: null,
   })
   callData!: {
     callType: 'audio' | 'video';
-    callStatus: 'completed' | 'missed' | 'declined';
+    callStatus: 'completed' | 'missed' | 'declined' | 'active';
     duration: number;
     isInitiator: boolean;
     wasRejected: boolean;
+    callId?: string;
   } | null;
 
   @Prop({
