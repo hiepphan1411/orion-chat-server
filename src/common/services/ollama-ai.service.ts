@@ -182,6 +182,10 @@ export class OllamaAiService {
   }
 
   async embedText(text: string): Promise<number[]> {
+    if (this.shouldUseGemini()) {
+      return this.hashEmbedding(text);
+    }
+
     const endpoint = this.getEmbeddingUrl();
     const model =
       this.configService.get<string>('OLLAMA_EMBEDDING_MODEL') ||
@@ -232,21 +236,10 @@ export class OllamaAiService {
 
   private shouldUseGemini() {
     const provider = (
-      this.configService.get<string>('AI_PROVIDER') || 'ollama'
+      this.configService.get<string>('AI_PROVIDER') || 'gemini'
     ).toLowerCase();
 
-    if (provider !== 'gemini') {
-      return false;
-    }
-
-    if (!this.geminiAiService.isConfigured()) {
-      this.logger.warn(
-        'AI_PROVIDER=gemini but no Gemini API key is configured. Falling back to Ollama.',
-      );
-      return false;
-    }
-
-    return true;
+    return provider === 'gemini';
   }
 
   private parseJson<T>(text: string): T | null {

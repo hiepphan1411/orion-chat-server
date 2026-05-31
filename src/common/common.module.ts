@@ -6,6 +6,7 @@ import { OllamaAiService } from './services/ollama-ai.service';
 import { GeminiAiService } from './services/gemini-ai.service';
 import { GeminiApiKeyConfigService } from './services/gemini-api-key-config.service';
 import { GeminiApiKeyManagementService } from './services/gemini-api-key-management.service';
+import { RedisKvService } from './services/redis-kv.service';
 
 @Global()
 @Module({
@@ -13,6 +14,7 @@ import { GeminiApiKeyManagementService } from './services/gemini-api-key-managem
   providers: [
     JwtAuthGuard,
     S3UploadService,
+    RedisKvService,
     GeminiApiKeyConfigService,
     GeminiApiKeyManagementService,
     GeminiAiService,
@@ -22,6 +24,7 @@ import { GeminiApiKeyManagementService } from './services/gemini-api-key-managem
     JwtAuthGuard,
     UsersModule,
     S3UploadService,
+    RedisKvService,
     GeminiApiKeyConfigService,
     GeminiApiKeyManagementService,
     GeminiAiService,

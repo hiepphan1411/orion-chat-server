@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { GeminiApiKeyConfigService } from './gemini-api-key-config.service';
+import { RedisKvService } from './redis-kv.service';
 
-type ApiKeyStatus = 'ACTIVE' | 'FAILED';
+type ApiKeyStatus = 'ACTIVE' | 'RATE_LIMITED' | 'QUOTA_EXHAUSTED' | 'FAILED';
 
 interface ApiKeyUsageStats {
   keyHash: string;
@@ -15,24 +17,31 @@ interface ApiKeyUsageStats {
   totalFailedRequests: number;
   lastMinuteReset: number;
   lastDailyResetDate: string;
+  blockedUntil?: number;
+  disabledReason?: string;
   lastFailureMessage?: string;
+  updatedAt: string;
 }
 
 @Injectable()
 export class GeminiApiKeyManagementService {
   private readonly logger = new Logger(GeminiApiKeyManagementService.name);
-  private readonly stats = new Map<string, ApiKeyUsageStats>();
 
-  constructor(private readonly apiKeyConfig: GeminiApiKeyConfigService) {}
+  constructor(
+    private readonly apiKeyConfig: GeminiApiKeyConfigService,
+    private readonly redis: RedisKvService,
+    private readonly configService: ConfigService,
+  ) {}
 
-  getNextAvailableApiKey(): string {
-    this.initializeApiKeys();
+  async getNextAvailableApiKey(): Promise<string> {
+    await this.initializeApiKeys();
 
     const requestsPerMinuteLimit =
       this.apiKeyConfig.getRequestsPerMinuteLimit();
     const requestsPerDayLimit = this.apiKeyConfig.getRequestsPerDayLimit();
+    const stats = await this.getRegisteredStats();
 
-    const candidates = [...this.stats.values()]
+    const candidates = stats
       .map((stat) => this.resetCounterIfNeeded(stat))
       .filter(
         (stat) =>
@@ -49,6 +58,7 @@ export class GeminiApiKeyManagementService {
 
     const selected = candidates[0];
     if (!selected) {
+      await Promise.all(stats.map((stat) => this.saveStats(stat)));
       throw new Error(
         `No available Gemini API keys within quota (${requestsPerMinuteLimit}/minute, ${requestsPerDayLimit}/day per key)`,
       );
@@ -56,34 +66,43 @@ export class GeminiApiKeyManagementService {
 
     selected.requestCountCurrentMinute += 1;
     selected.requestCountCurrentDay += 1;
+    this.applyQuotaStatus(selected);
+    await this.saveStats(selected);
 
     this.logger.debug(
-      `Selected Gemini key ${selected.apiKeyMasked}, minute requests: ${selected.requestCountCurrentMinute}/${requestsPerMinuteLimit}, day requests: ${selected.requestCountCurrentDay}/${requestsPerDayLimit}`,
+      `Selected Gemini key ${selected.apiKeyMasked}, status=${selected.status}, minute requests: ${selected.requestCountCurrentMinute}/${requestsPerMinuteLimit}, day requests: ${selected.requestCountCurrentDay}/${requestsPerDayLimit}`,
     );
 
     return this.findRawApiKeyByHash(selected.keyHash);
   }
 
-  recordSuccess(apiKey: string): void {
-    const stat = this.getOrCreateStats(apiKey);
-    stat.status = 'ACTIVE';
+  async recordSuccess(apiKey: string): Promise<void> {
+    const stat = await this.getOrCreateStats(apiKey);
     stat.consecutiveFailures = 0;
     stat.totalSuccessfulRequests += 1;
     stat.lastFailureMessage = undefined;
+    this.applyQuotaStatus(stat);
+    await this.saveStats(stat);
   }
 
-  recordFailure(apiKey: string, failureMessage: string): void {
-    const stat = this.getOrCreateStats(apiKey);
+  async recordFailure(apiKey: string, failureMessage: string): Promise<void> {
+    const stat = await this.getOrCreateStats(apiKey);
     stat.consecutiveFailures += 1;
     stat.totalFailedRequests += 1;
+    stat.status = this.isQuotaFailure(failureMessage)
+      ? 'QUOTA_EXHAUSTED'
+      : 'FAILED';
+    stat.disabledReason = failureMessage;
     stat.lastFailureMessage = failureMessage;
+    stat.blockedUntil =
+      stat.status === 'QUOTA_EXHAUSTED'
+        ? this.getNextDayStartMs()
+        : undefined;
 
-    if (stat.consecutiveFailures >= 3) {
-      stat.status = 'FAILED';
-    }
+    await this.saveStats(stat);
 
     this.logger.warn(
-      `Gemini key ${stat.apiKeyMasked} failed: ${failureMessage} (consecutive failures: ${stat.consecutiveFailures})`,
+      `Disabled Gemini key ${stat.apiKeyMasked}: ${failureMessage} (status=${stat.status})`,
     );
   }
 
@@ -91,19 +110,54 @@ export class GeminiApiKeyManagementService {
     return this.apiKeyConfig.getApiKeyCount();
   }
 
-  private initializeApiKeys(): void {
-    for (const apiKey of this.apiKeyConfig.getApiKeys()) {
-      this.getOrCreateStats(apiKey);
-    }
+  private async initializeApiKeys(): Promise<void> {
+    const apiKeys = this.apiKeyConfig.getApiKeys();
+    const keyHashes = apiKeys.map((apiKey) => this.hashApiKey(apiKey));
+
+    await this.redis.sadd(this.getKeyListRedisKey(), keyHashes);
+    await Promise.all(apiKeys.map((apiKey) => this.getOrCreateStats(apiKey)));
   }
 
-  private getOrCreateStats(apiKey: string): ApiKeyUsageStats {
+  private async getRegisteredStats(): Promise<ApiKeyUsageStats[]> {
+    const keyHashes = await this.redis.smembers(this.getKeyListRedisKey());
+    const configuredHashes = new Set(
+      this.apiKeyConfig.getApiKeys().map((apiKey) => this.hashApiKey(apiKey)),
+    );
+    const rows = await Promise.all(
+      keyHashes
+        .filter((keyHash) => configuredHashes.has(keyHash))
+        .map(async (keyHash) => {
+          const json = await this.redis.get(this.getStatsRedisKey(keyHash));
+          if (!json) {
+            return null;
+          }
+
+          try {
+            return JSON.parse(json) as ApiKeyUsageStats;
+          } catch {
+            this.logger.warn(`Ignoring invalid Gemini key stats: ${keyHash}`);
+            return null;
+          }
+        }),
+    );
+
+    return rows.filter((item): item is ApiKeyUsageStats => item !== null);
+  }
+
+  private async getOrCreateStats(apiKey: string): Promise<ApiKeyUsageStats> {
     const keyHash = this.hashApiKey(apiKey);
-    const existing = this.stats.get(keyHash);
+    const redisKey = this.getStatsRedisKey(keyHash);
+    const existing = await this.redis.get(redisKey);
+
     if (existing) {
-      return this.resetCounterIfNeeded(existing);
+      try {
+        return this.resetCounterIfNeeded(JSON.parse(existing) as ApiKeyUsageStats);
+      } catch {
+        this.logger.warn(`Recreating invalid Gemini key stats: ${keyHash}`);
+      }
     }
 
+    const now = Date.now();
     const stat: ApiKeyUsageStats = {
       keyHash,
       apiKeyMasked: this.maskApiKey(apiKey),
@@ -113,12 +167,18 @@ export class GeminiApiKeyManagementService {
       consecutiveFailures: 0,
       totalSuccessfulRequests: 0,
       totalFailedRequests: 0,
-      lastMinuteReset: Date.now(),
+      lastMinuteReset: now,
       lastDailyResetDate: this.getTodayKey(),
+      updatedAt: new Date(now).toISOString(),
     };
 
-    this.stats.set(keyHash, stat);
+    await this.saveStats(stat);
     return stat;
+  }
+
+  private async saveStats(stat: ApiKeyUsageStats): Promise<void> {
+    stat.updatedAt = new Date().toISOString();
+    await this.redis.set(this.getStatsRedisKey(stat.keyHash), JSON.stringify(stat));
   }
 
   private resetCounterIfNeeded(stat: ApiKeyUsageStats): ApiKeyUsageStats {
@@ -126,9 +186,10 @@ export class GeminiApiKeyManagementService {
     if (now - stat.lastMinuteReset >= 60_000) {
       stat.requestCountCurrentMinute = 0;
       stat.lastMinuteReset = now;
-      if (stat.status === 'FAILED') {
+      if (stat.status === 'RATE_LIMITED' && (stat.blockedUntil || 0) <= now) {
         stat.status = 'ACTIVE';
-        stat.consecutiveFailures = 0;
+        stat.blockedUntil = undefined;
+        stat.disabledReason = undefined;
       }
     }
 
@@ -136,11 +197,40 @@ export class GeminiApiKeyManagementService {
     if (stat.lastDailyResetDate !== today) {
       stat.requestCountCurrentDay = 0;
       stat.lastDailyResetDate = today;
-      stat.status = 'ACTIVE';
-      stat.consecutiveFailures = 0;
+      if (stat.status === 'QUOTA_EXHAUSTED') {
+        stat.status = 'ACTIVE';
+        stat.blockedUntil = undefined;
+        stat.disabledReason = undefined;
+      }
     }
 
     return stat;
+  }
+
+  private applyQuotaStatus(stat: ApiKeyUsageStats): void {
+    const requestsPerMinuteLimit =
+      this.apiKeyConfig.getRequestsPerMinuteLimit();
+    const requestsPerDayLimit = this.apiKeyConfig.getRequestsPerDayLimit();
+
+    if (stat.requestCountCurrentDay >= requestsPerDayLimit) {
+      stat.status = 'QUOTA_EXHAUSTED';
+      stat.blockedUntil = this.getNextDayStartMs();
+      stat.disabledReason = `Daily quota reached (${requestsPerDayLimit}/day)`;
+      return;
+    }
+
+    if (stat.requestCountCurrentMinute >= requestsPerMinuteLimit) {
+      stat.status = 'RATE_LIMITED';
+      stat.blockedUntil = stat.lastMinuteReset + 60_000;
+      stat.disabledReason = `Minute quota reached (${requestsPerMinuteLimit}/minute)`;
+      return;
+    }
+
+    if (stat.status === 'RATE_LIMITED' || stat.status === 'QUOTA_EXHAUSTED') {
+      stat.status = 'ACTIVE';
+      stat.blockedUntil = undefined;
+      stat.disabledReason = undefined;
+    }
   }
 
   private findRawApiKeyByHash(keyHash: string): string {
@@ -151,6 +241,10 @@ export class GeminiApiKeyManagementService {
       throw new Error('Cannot find raw Gemini API key for selected hash');
     }
     return apiKey;
+  }
+
+  private isQuotaFailure(message: string): boolean {
+    return /quota|rate|429|resource exhausted|too many requests/i.test(message);
   }
 
   private hashApiKey(apiKey: string): string {
@@ -166,5 +260,26 @@ export class GeminiApiKeyManagementService {
 
   private getTodayKey(): string {
     return new Date().toISOString().slice(0, 10);
+  }
+
+  private getNextDayStartMs(): number {
+    const nextDay = new Date();
+    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setHours(0, 0, 0, 0);
+    return nextDay.getTime();
+  }
+
+  private getKeyListRedisKey(): string {
+    return `${this.getRedisPrefix()}:keys`;
+  }
+
+  private getStatsRedisKey(keyHash: string): string {
+    return `${this.getRedisPrefix()}:key:${keyHash}`;
+  }
+
+  private getRedisPrefix(): string {
+    return (
+      this.configService.get<string>('GEMINI_REDIS_PREFIX') || 'orion:gemini'
+    );
   }
 }

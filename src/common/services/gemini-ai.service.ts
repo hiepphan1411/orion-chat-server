@@ -73,14 +73,14 @@ export class GeminiAiService {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       let apiKey = '';
       try {
-        apiKey = this.apiKeyManagementService.getNextAvailableApiKey();
+        apiKey = await this.apiKeyManagementService.getNextAvailableApiKey();
         const response = await this.callGeminiWithKey(apiKey, options);
         if (response) {
-          this.apiKeyManagementService.recordSuccess(apiKey);
+          await this.apiKeyManagementService.recordSuccess(apiKey);
           return response;
         }
 
-        this.apiKeyManagementService.recordFailure(
+        await this.apiKeyManagementService.recordFailure(
           apiKey,
           'Rate limit or quota exceeded',
         );
@@ -89,7 +89,7 @@ export class GeminiAiService {
         const message = error instanceof Error ? error.message : 'Unknown error';
         failures.push(`Attempt ${attempt + 1}: ${message}`);
         if (apiKey) {
-          this.apiKeyManagementService.recordFailure(apiKey, message);
+          await this.apiKeyManagementService.recordFailure(apiKey, message);
         }
       }
     }

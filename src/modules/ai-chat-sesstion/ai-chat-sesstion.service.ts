@@ -241,7 +241,7 @@ export class AIChatSessionService {
 
   private getDefaultAiModel() {
     const provider = (
-      this.configService.get<string>('AI_PROVIDER') || 'ollama'
+      this.configService.get<string>('AI_PROVIDER') || 'gemini'
     ).toLowerCase();
 
     if (provider === 'gemini') {
