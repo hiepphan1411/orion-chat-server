@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Model } from 'mongoose';
@@ -34,6 +35,7 @@ export class AIChatSessionService {
     private readonly messageService: AIMessageService,
     private readonly aiRagService: AIRagService,
     private readonly ollamaAiService: OllamaAiService,
+    private readonly configService: ConfigService,
     @InjectRepository(CalendarEvent)
     private readonly calendarEventRepo: Repository<CalendarEvent>,
     @InjectRepository(PersonalNote)
@@ -54,7 +56,7 @@ export class AIChatSessionService {
   ): Promise<AIChatSession> {
     const session = new this.sessionModel({
       userId,
-      aiModel: this.normalizeOllamaModel(aiModel) || 'qwen2.5:7b',
+      aiModel: this.normalizeAiModel(aiModel) || this.getDefaultAiModel(),
       systemPrompt,
       title: title?.trim() || 'New Conversation',
     });
@@ -79,7 +81,7 @@ export class AIChatSessionService {
       ...update,
       aiModel:
         update.aiModel !== undefined
-          ? this.normalizeOllamaModel(update.aiModel) || 'qwen2.5:7b'
+          ? this.normalizeAiModel(update.aiModel) || this.getDefaultAiModel()
           : undefined,
     };
 
@@ -149,7 +151,7 @@ export class AIChatSessionService {
         const attachmentNote =
           isAudioAttachment && isVoicePlaceholder
             ? 'User sent an audio attachment. Ask for a transcript if needed, and answer in Vietnamese from available context.'
-            : `User sent an attachment with mime type ${attachment.mimeType}. Local Ollama text chat cannot read raw binary data directly.`;
+            : `User sent an attachment with mime type ${attachment.mimeType}. The configured text AI cannot read raw binary data directly.`;
 
         lastContent.content = `${lastContent.content}\n\n[${attachmentNote}]`;
       }
@@ -189,7 +191,7 @@ export class AIChatSessionService {
       : systemPrompt;
 
     const response = await this.ollamaAiService.generateChat({
-      model: this.normalizeOllamaModel(session.aiModel),
+      model: this.normalizeAiModel(session.aiModel),
       messages: [
         { role: 'system', content: effectiveSystemPrompt },
         ...chatMessages,
@@ -230,11 +232,25 @@ export class AIChatSessionService {
     return session;
   }
 
-  private normalizeOllamaModel(model?: string) {
-    if (!model || model.toLowerCase().includes('gemini')) {
+  private normalizeAiModel(model?: string) {
+    if (!model) {
       return undefined;
     }
     return model;
+  }
+
+  private getDefaultAiModel() {
+    const provider = (
+      this.configService.get<string>('AI_PROVIDER') || 'ollama'
+    ).toLowerCase();
+
+    if (provider === 'gemini') {
+      return (
+        this.configService.get<string>('GEMINI_MODEL') || 'gemini-flash-latest'
+      );
+    }
+
+    return this.configService.get<string>('OLLAMA_MODEL') || 'qwen2.5:7b';
   }
 
   private async buildPersonalMemoryContext(userId: string, query: string) {

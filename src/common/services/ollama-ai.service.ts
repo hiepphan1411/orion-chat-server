@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { GeminiAiService } from './gemini-ai.service';
 
 interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -51,7 +52,10 @@ export class OllamaAiService {
     'giả vờ là',
   ];
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly geminiAiService: GeminiAiService,
+  ) {}
 
   sanitize(input: string, maxLength = this.maxInputLength): string {
     const normalized = String(input || '').trim();
@@ -83,6 +87,10 @@ export class OllamaAiService {
     maxOutputTokens?: number;
     model?: string;
   }): Promise<{ text: string; tokenUsed?: number; usedFallback: boolean }> {
+    if (this.shouldUseGemini()) {
+      return this.geminiAiService.generateText(options);
+    }
+
     return this.generateChat({
       messages: [
         { role: 'system', content: options.systemPrompt },
@@ -100,6 +108,10 @@ export class OllamaAiService {
     maxOutputTokens?: number;
     model?: string;
   }): Promise<{ text: string; tokenUsed?: number; usedFallback: boolean }> {
+    if (this.shouldUseGemini()) {
+      return this.geminiAiService.generateChat(options);
+    }
+
     const endpoint = this.getChatUrl();
     const model = options.model || this.getModel();
 
@@ -216,6 +228,25 @@ export class OllamaAiService {
 
   private getModel() {
     return this.configService.get<string>('OLLAMA_MODEL') || 'qwen2.5:7b';
+  }
+
+  private shouldUseGemini() {
+    const provider = (
+      this.configService.get<string>('AI_PROVIDER') || 'ollama'
+    ).toLowerCase();
+
+    if (provider !== 'gemini') {
+      return false;
+    }
+
+    if (!this.geminiAiService.isConfigured()) {
+      this.logger.warn(
+        'AI_PROVIDER=gemini but no Gemini API key is configured. Falling back to Ollama.',
+      );
+      return false;
+    }
+
+    return true;
   }
 
   private parseJson<T>(text: string): T | null {
