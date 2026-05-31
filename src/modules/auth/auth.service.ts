@@ -110,7 +110,10 @@ export class AuthService {
         where: { phoneNumber },
       });
       if (existingUser != null) {
-        throw new BadRequestException('Số điện thoại đã tồn tại');
+        return {
+          success: false,
+          message: 'Số điện thoại đã tồn tại',
+        };
       }
 
       // Delete old OTP for this phone number
@@ -124,14 +127,14 @@ export class AuthService {
       console.log(`${'='.repeat(60)}`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`OTP Code: ${otp}`);
-      console.log(`Expires in: 5 minutes`);
+      console.log(`Expires in: 1 minute`);
       console.log(`${'='.repeat(60)}\n`);
 
       // Save new OTP to database
       const savedOtp = await this.otpRepo.save({
         phoneNumber,
         code: otp,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 1 * 60 * 1000),
       });
 
       // Send SMS via eSMS
@@ -143,7 +146,7 @@ export class AuthService {
         data: {
           phoneNumber,
           otpId: savedOtp.id,
-          expiresIn: 300, // 5 minutes in seconds
+          expiresIn: 60, // 1 minute in seconds
         },
         timestamp: new Date().toISOString(),
       };
@@ -164,7 +167,10 @@ export class AuthService {
         where: { phoneNumber },
       });
       if (!existingUser) {
-        throw new BadRequestException('Số điện thoại không tồn tại');
+        return {
+          success: false,
+          message: 'Số điện thoại không tồn tại',
+        };
       }
 
       // xóa OTP cũ cho số điện thoại này
@@ -175,14 +181,14 @@ export class AuthService {
       console.log(`OTP CONSOLE OUTPUT\n`);
       console.log(`Phone: ${phoneNumber}`);
       console.log(`OTP Code: ${otp}`);
-      console.log(`Expires in: 5 minutes`);
+      console.log(`Expires in: 1 minute`);
       console.log(`${'='.repeat(60)}\n`);
 
       // lưu OTP mới vào cơ sở dữ liệu
       const savedOtp = await this.otpRepo.save({
         phoneNumber,
         code: otp,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 1 * 60 * 1000),
       });
 
       // Send SMS via eSMS
@@ -194,7 +200,7 @@ export class AuthService {
         data: {
           phoneNumber,
           otpId: savedOtp.id,
-          expiresIn: 300, // 5 minutes in seconds
+          expiresIn: 60, // 1 minute in seconds
         },
         timestamp: new Date().toISOString(),
       };
@@ -276,7 +282,8 @@ export class AuthService {
       // Check if OTP has expired
 
       if (record.expiresAt < new Date()) {
-        throw new BadRequestException('OTP đã hết hạn');
+        this.logger.warn(`OTP đã hết hạn. Vui lòng yêu cầu OTP mới. (Phone: ${phoneNumber})`);
+        throw new BadRequestException('OTP đã hết hạn. Vui lòng yêu cầu OTP mới.');
       }
 
       // Delete used OTP
@@ -292,12 +299,13 @@ export class AuthService {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       this.logger.error('Error verifying OTP:', error);
-      throw error instanceof BadRequestException
-        ? error
-        : new BadRequestException(
-            error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
-          );
+      throw new BadRequestException(
+        error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
+      );
     }
   }
 
@@ -778,6 +786,7 @@ export class AuthService {
       // kiểm tra thời gian hết hạn
       if (new Date() > otpRecord.expiresAt) {
         await this.otpRepo.delete({ id: otpRecord.id });
+        this.logger.warn(`OTP đã hết hạn. Vui lòng yêu cầu OTP mới. (Phone: ${phoneNumber})`);
         throw new BadRequestException(
           'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
         );
@@ -797,12 +806,13 @@ export class AuthService {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       this.logger.error('Error verifying OTP for forget password:', error);
-      throw error instanceof BadRequestException
-        ? error
-        : new BadRequestException(
-            error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
-          );
+      throw new BadRequestException(
+        error.message || 'Lỗi xác minh OTP. Vui lòng thử lại.',
+      );
     }
   }
 
@@ -851,6 +861,7 @@ export class AuthService {
       // kiểm tra thời gian hết hạn
       if (new Date() > otpRecord.expiresAt) {
         await this.otpRepo.delete({ id: otpRecord.id });
+        this.logger.warn(`OTP đã hết hạn. Vui lòng yêu cầu OTP mới. (Phone: ${data.phoneNumber})`);
         throw new BadRequestException(
           'OTP đã hết hạn. Vui lòng yêu cầu OTP mới.',
         );
@@ -882,12 +893,13 @@ export class AuthService {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       this.logger.error('Error resetting password:', error);
-      throw error instanceof BadRequestException
-        ? error
-        : new BadRequestException(
-            error.message || 'Lỗi đặt lại mật khẩu. Vui lòng thử lại.',
-          );
+      throw new BadRequestException(
+        error.message || 'Lỗi đặt lại mật khẩu. Vui lòng thử lại.',
+      );
     }
   }
 }
