@@ -484,9 +484,9 @@ export class ConversationService {
     );
     const allParticipantIds = [creatorId, ...normalizedMemberIds];
 
-    if (normalizedMemberIds.length === 0) {
+    if (normalizedMemberIds.length < 2) {
       throw new BadRequestException(
-        'Group must contain at least one member besides creator',
+        'Nhóm phải có ít nhất 3 thành viên (bao gồm cả bạn)',
       );
     }
 

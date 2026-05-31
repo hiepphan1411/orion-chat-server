@@ -142,6 +142,62 @@ export class AuthController {
     });
   }
 
+  @Post('qr/session')
+  createQrLoginSession(
+    @Body()
+    body?: {
+      deviceName?: string;
+      deviceType?: string;
+      deviceModel?: string;
+      osType?: string;
+      osVersion?: string;
+      appVersion?: string;
+      ipAddress?: string;
+    },
+    @Request()
+    req?: {
+      headers: Record<string, string | string[] | undefined>;
+      ip?: string;
+    },
+  ) {
+    const forwardedFor = req?.headers?.['x-forwarded-for'];
+    const forwardedIp = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor?.split(',')[0]?.trim();
+
+    return this.authService.createQrLoginSession({
+      deviceName: body?.deviceName || 'QR Login on Web',
+      deviceType: 'web',
+      deviceModel: body?.deviceModel || 'Web Browser',
+      osType: body?.osType || 'Unknown OS',
+      osVersion: body?.osVersion,
+      appVersion: body?.appVersion || 'web',
+      ipAddress: body?.ipAddress || forwardedIp || req?.ip,
+    });
+  }
+
+  @Post('qr/status')
+  getQrLoginStatus(@Body() body: { sessionId: string }) {
+    if (!body?.sessionId) {
+      throw new BadRequestException('sessionId is required');
+    }
+
+    return this.authService.getQrLoginSession(body.sessionId);
+  }
+
+  @Post('qr/confirm')
+  @UseGuards(JwtSessionGuard)
+  confirmQrLogin(
+    @Request() req: { user: { userId: string } },
+    @Body() body: { qrToken: string },
+  ) {
+    if (!body?.qrToken) {
+      throw new BadRequestException('qrToken is required');
+    }
+
+    return this.authService.confirmQrLogin(body.qrToken, req.user.userId);
+  }
+
   @Post('logout')
   @UseGuards(JwtSessionGuard)
   logout(

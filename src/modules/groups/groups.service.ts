@@ -16,6 +16,9 @@ import {
 import { ConversationParticipant } from '../conversation/entities/conversation-participant.entity';
 import { ParticipantRole } from '../conversation/entities/conversation-participant.entity';
 import { User } from '../users/entities/user.entity';
+import { MessageService } from '../message/message.service';
+import { ChatGateway } from '../message/chat.gateway';
+import { MessageType } from 'src/common/enums/message-type.enum';
 
 const GROUP_MEMBER_LIMIT = 10;
 const CO_ADMIN_LIMIT = 5;
@@ -34,6 +37,8 @@ export class GroupsService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly s3UploadService: S3UploadService,
+    private readonly messageService: MessageService,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   private isAdminRole(role: GroupMemberRole): boolean {
@@ -107,6 +112,39 @@ export class GroupsService {
     }
 
     return ranked[0] || null;
+  }
+
+  private async createAndEmitSystemMessage(
+    groupId: string,
+    content: string,
+    senderBy: string,
+    senderName: string,
+    senderAvatar?: string,
+  ) {
+    try {
+      const message = await this.messageService.createMessage({
+        conversationId: groupId,
+        senderBy,
+        content,
+        messageType: MessageType.SYSTEM,
+      });
+
+      this.chatGateway.emitNewMessage({
+        conversationId: groupId,
+        messageId: String(message._id),
+        senderBy,
+        senderName,
+        senderAvatar,
+        content,
+        messageType: MessageType.SYSTEM,
+        createdAt: message.createdAt
+          ? message.createdAt.toISOString()
+          : new Date().toISOString(),
+        messageStatus: 'SENT',
+      });
+    } catch (err) {
+      console.error('Failed to create/emit system message:', err);
+    }
   }
 
   async getMembers(groupId: string, userId: string) {

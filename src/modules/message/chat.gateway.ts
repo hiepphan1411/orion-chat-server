@@ -585,12 +585,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      await this.chatMembershipService.assertConversationMember(
-        userId,
-        data.conversationId,
-      );
-
       void client.leave(`conversation:${data.conversationId}`);
+      void client.leave(data.conversationId);
       return this.buildSuccessAck(data.requestId, {
         conversationId: data.conversationId,
       });

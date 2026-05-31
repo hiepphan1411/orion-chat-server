@@ -13,6 +13,7 @@ import { Repository } from 'typeorm';
 import { Otp } from './entities/otp.entity';
 import axios from 'axios';
 import bcrypt from 'bcrypt';
+import { randomBytes, randomUUID } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { CompleteRegisterDto } from './dto/complete-register.dto';
 import { UserDevicesService } from '../user-devices/user-devices.service';
@@ -33,12 +34,28 @@ type LoginDevicePayload = Partial<
   >
 >;
 
+type QrLoginStatus = 'pending' | 'confirmed';
+
+type QrLoginSession = {
+  sessionId: string;
+  qrToken: string;
+  status: QrLoginStatus;
+  expiresAt: Date;
+  createdAt: Date;
+  devicePayload?: LoginDevicePayload;
+  confirmedByUserId?: string;
+  confirmedAt?: Date;
+  loginData?: Record<string, unknown>;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly esmsApiKey: string;
   private readonly esmsSecretKey: string;
   private readonly esmsBaseUrl: string;
+  private readonly qrLoginSessions = new Map<string, QrLoginSession>();
+  private readonly qrLoginTokens = new Map<string, string>();
 
   constructor(
     @InjectRepository(Otp)
@@ -97,6 +114,173 @@ export class AuthService {
         expiresIn: '24h', // Token valid for 24 hours
       },
     );
+  }
+
+  private buildLoginData(user: User, token: string) {
+    return {
+      token,
+      phoneNumber: user.phoneNumber,
+      fullName: user.fullName,
+      birthDate: user.birthDate,
+      gender: user.gender,
+      loginTime: new Date().toISOString(),
+      userId: user.userId,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      coverImage: user.coverImage,
+      isOnline: user.isOnline,
+      showOnlineStatus: user.showOnlineStatus,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
+    };
+  }
+
+  private cleanupExpiredQrLoginSessions(): void {
+    const now = Date.now();
+    for (const [sessionId, session] of this.qrLoginSessions.entries()) {
+      if (session.expiresAt.getTime() <= now) {
+        this.qrLoginSessions.delete(sessionId);
+        this.qrLoginTokens.delete(session.qrToken);
+      }
+    }
+  }
+
+  createQrLoginSession(devicePayload?: LoginDevicePayload) {
+    this.cleanupExpiredQrLoginSessions();
+
+    const sessionId = randomUUID();
+    const qrToken = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
+    const session: QrLoginSession = {
+      sessionId,
+      qrToken,
+      status: 'pending',
+      expiresAt,
+      createdAt: new Date(),
+      devicePayload: {
+        ...devicePayload,
+        deviceType: 'web',
+      },
+    };
+
+    this.qrLoginSessions.set(sessionId, session);
+    this.qrLoginTokens.set(qrToken, sessionId);
+
+    return {
+      success: true,
+      message: 'Táº¡o mÃ£ QR Ä‘Äƒng nháº­p thÃ nh cÃ´ng',
+      data: {
+        sessionId,
+        qrToken,
+        qrData: `orionchatmobile://qr-login?token=${encodeURIComponent(qrToken)}`,
+        expiresAt: expiresAt.toISOString(),
+        expiresIn: 120,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  getQrLoginSession(sessionId: string) {
+    this.cleanupExpiredQrLoginSessions();
+
+    const session = this.qrLoginSessions.get(sessionId);
+    if (!session) {
+      return {
+        success: true,
+        data: {
+          status: 'expired',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        status: session.status,
+        expiresAt: session.expiresAt.toISOString(),
+        confirmedAt: session.confirmedAt?.toISOString(),
+        loginData: session.loginData,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async confirmQrLogin(qrToken: string, userId: string) {
+    this.cleanupExpiredQrLoginSessions();
+
+    const sessionId = this.qrLoginTokens.get(qrToken);
+    const session = sessionId ? this.qrLoginSessions.get(sessionId) : null;
+
+    if (!session) {
+      throw new BadRequestException('MÃ£ QR Ä‘Ã£ háº¿t háº¡n hoáº·c khÃ´ng há»£p lá»‡');
+    }
+
+    if (session.status === 'confirmed') {
+      return {
+        success: true,
+        message: 'MÃ£ QR Ä‘Ã£ Ä‘Æ°á»£c xÃ¡c nháº­n',
+        data: {
+          status: 'confirmed',
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const user = await this.userRepo.findOne({ where: { userId } });
+    if (!user) {
+      throw new BadRequestException('NgÆ°á»i dÃ¹ng khÃ´ng tá»“n táº¡i');
+    }
+
+    const oldSessionExists = user.webSessionToken;
+    const token = this.generateJwtToken(user.phoneNumber, user.userId, 'web');
+    const now = new Date();
+
+    user.webSessionToken = token;
+    user.webSessionStartedAt = now;
+    user.webLastActivityAt = Date.now();
+    user.lastLoginAt = now;
+    user.lastActivityAt = Date.now();
+    await this.userRepo.save(user);
+
+    if (oldSessionExists) {
+      this.emitSessionConflict(user.userId, 'web', 'web', oldSessionExists);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    try {
+      await this.syncDeviceOnLogin(user.userId, token, {
+        deviceName: session.devicePayload?.deviceName || 'QR Login on Web',
+        deviceType: 'web',
+        deviceModel: session.devicePayload?.deviceModel || 'Web Browser',
+        osType: session.devicePayload?.osType || 'Unknown OS',
+        osVersion: session.devicePayload?.osVersion,
+        appVersion: session.devicePayload?.appVersion || 'web',
+        ipAddress: session.devicePayload?.ipAddress,
+      });
+    } catch (deviceError) {
+      this.logger.warn(
+        `Failed to sync QR login device for user ${user.userId}: ${
+          deviceError instanceof Error ? deviceError.message : deviceError
+        }`,
+      );
+    }
+
+    session.status = 'confirmed';
+    session.confirmedByUserId = user.userId;
+    session.confirmedAt = new Date();
+    session.loginData = this.buildLoginData(user, token);
+    this.qrLoginSessions.set(session.sessionId, session);
+
+    return {
+      success: true,
+      message: 'ÄÃ£ xÃ¡c nháº­n Ä‘Äƒng nháº­p web',
+      data: {
+        status: 'confirmed',
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async sendOtp(phoneNumber: string) {
@@ -607,23 +791,7 @@ export class AuthService {
       return {
         success: true,
         message: 'Đăng nhập thành công',
-        data: {
-          token,
-          phoneNumber: user.phoneNumber,
-          fullName: user.fullName,
-          birthDate: user.birthDate,
-          gender: user.gender,
-          loginTime: new Date().toISOString(),
-          userId: user.userId,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-          coverImage: user.coverImage,
-          isOnline: user.isOnline,
-          showOnlineStatus: user.showOnlineStatus,
-          isActive: user.isActive,
-          createdAt: user.createdAt,
-          lastLoginAt: user.lastLoginAt,
-        },
+        data: this.buildLoginData(user, token),
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
