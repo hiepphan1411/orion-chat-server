@@ -23,6 +23,10 @@ import {
   GroupMember,
   GroupMemberRole,
 } from '../group-member/entities/group-member.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from '../friendship/entities/friendship.entity';
 
 const bcryptLib = bcrypt as unknown as {
   hash: (value: string, saltRounds: number) => Promise<string>;
@@ -139,11 +143,16 @@ type ConversationView = {
   myBlockedAt?: Date | null;
   myBlockedBy?: string | null;
   lastMessage: {
+    messageId?: string;
+    _id?: string;
+    clientMessageId?: string;
     content?: string;
     messageType?: string;
     senderBy?: string;
     createdAt?: Date | string;
     messageStatus?: string;
+    isRecalled?: boolean;
+    isRevoked?: boolean;
   } | null;
   groupInfo: {
     groupName: string;
@@ -191,9 +200,40 @@ export class ConversationService {
     private readonly groupMemberRepo: Repository<GroupMember>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Friendship)
+    private readonly friendshipRepo: Repository<Friendship>,
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
   ) {}
+
+  private async assertNoBlockedFriendship(userId: string, otherUserId: string) {
+    const blockedFriendship = await this.friendshipRepo.findOne({
+      where: [
+        {
+          userOne: { userId },
+          userTwo: { userId: otherUserId },
+          status: FriendshipStatus.BLOCKED,
+        },
+        {
+          userOne: { userId: otherUserId },
+          userTwo: { userId },
+          status: FriendshipStatus.BLOCKED,
+        },
+      ],
+    });
+
+    if (blockedFriendship) {
+      const blockedBy = blockedFriendship.blockedByUserId;
+      if (blockedBy === userId) {
+        throw new ForbiddenException(
+          'You blocked this user. Unblock to continue chatting.',
+        );
+      }
+      throw new ForbiddenException(
+        'You cannot chat with this user because they blocked you.',
+      );
+    }
+  }
 
   async findAllByUserId(userId: string) {
     const memberships = await this.participantRepo.find({
@@ -383,6 +423,8 @@ export class ConversationService {
     if (!recipient) {
       throw new NotFoundException(`Recipient not found: ${recipientId}`);
     }
+
+    await this.assertNoBlockedFriendship(currentUserId, recipientId);
 
     // Try to find existing PRIVATE conversation containing both participants
     const existingConversation = await this.conversationRepo
@@ -694,7 +736,9 @@ export class ConversationService {
         senderBy: senderId, // Mobile expects senderBy for comparison
         senderName: item.senderName || 'Unknown',
         senderAvatar: item.senderAvatar || undefined,
-        content: String(item.content || ''),
+        content: recalled
+          ? 'Tin nhắn đã được thu hồi'
+          : String(item.content || ''),
         messageType: item.messageType,
         callData: item.callData || null,
         reactions: Array.isArray(item.reactions)
@@ -762,6 +806,19 @@ export class ConversationService {
       conversationId,
       actorUserId,
     );
+
+    if (_membership.conversation.type === ConversationType.PRIVATE) {
+      const otherParticipant = _membership.conversation.participants.find(
+        (participant) => participant.userId !== actorUserId,
+      );
+
+      if (otherParticipant?.userId) {
+        await this.assertNoBlockedFriendship(
+          actorUserId,
+          otherParticipant.userId,
+        );
+      }
+    }
 
     if (payload.senderBy !== actorUserId) {
       throw new ForbiddenException('senderBy must match userId');
@@ -1209,11 +1266,18 @@ export class ConversationService {
           : null,
       lastMessage: latestMsg
         ? {
-            content: latestMsg.content,
+            messageId: latestMsg._id ? String(latestMsg._id) : undefined,
+            _id: latestMsg._id ? String(latestMsg._id) : undefined,
+            clientMessageId: latestMsg.clientMessageId,
+            content: latestMsg.isRevoked
+              ? 'Tin nhắn đã được thu hồi'
+              : latestMsg.content,
             messageType: latestMsg.messageType,
             senderBy: latestMsg.senderBy,
             createdAt: latestMsg.createdAt,
             messageStatus: latestMsg.messageStatus,
+            isRecalled: !!latestMsg.isRevoked,
+            isRevoked: !!latestMsg.isRevoked,
           }
         : null,
       groupInfo: c.groupInfo

@@ -32,6 +32,9 @@ export class Friendship {
   })
   status: FriendshipStatus;
 
+  @Column({ type: 'uuid', nullable: true })
+  blockedByUserId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

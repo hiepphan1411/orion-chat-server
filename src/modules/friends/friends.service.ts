@@ -63,11 +63,11 @@ export class FriendsService {
       relations: ['userOne', 'userTwo'],
     });
 
-    return new Set(
-      rows.map((row) =>
-        row.userOne.userId === userId ? row.userTwo.userId : row.userOne.userId,
-      ),
-    );
+    return new Set(rows.map((row) => {
+      const otherId =
+        row.userOne.userId === userId ? row.userTwo.userId : row.userOne.userId;
+      return otherId;
+    }));
   }
 
   async getFriends(userId: string) {
@@ -125,7 +125,10 @@ export class FriendsService {
   }
 
   async getSuggestedByMutualGroups(userId: string) {
-    const friendIds = await this.getFriendIdSet(userId);
+    const [friendIds, blockedIds] = await Promise.all([
+      this.getFriendIdSet(userId),
+      this.getBlockedIdSet(userId),
+    ]);
 
     const myMemberships = await this.groupMemberRepo.find({
       where: { user: { userId } },
@@ -150,7 +153,7 @@ export class FriendsService {
 
     for (const member of members) {
       const uid = member.user.userId;
-      if (uid === userId || friendIds.has(uid)) continue;
+      if (uid === userId || friendIds.has(uid) || blockedIds.has(uid)) continue;
 
       const existing = counter.get(uid);
       if (existing) {
@@ -204,10 +207,7 @@ export class FriendsService {
 
   async getBlockedFriends(userId: string) {
     const rows = await this.friendshipRepo.find({
-      where: [
-        { userOne: { userId }, status: FriendshipStatus.BLOCKED },
-        { userTwo: { userId }, status: FriendshipStatus.BLOCKED },
-      ],
+      where: [{ status: FriendshipStatus.BLOCKED, blockedByUserId: userId }],
       relations: ['userOne', 'userTwo'],
       order: { createdAt: 'DESC' },
     });
@@ -302,10 +302,17 @@ export class FriendsService {
         userOne,
         userTwo,
         status: FriendshipStatus.BLOCKED,
+        blockedByUserId: userId,
       });
       await this.friendshipRepo.save(blocked);
     } else if (friendship.status !== FriendshipStatus.BLOCKED) {
       friendship.status = FriendshipStatus.BLOCKED;
+      friendship.blockedByUserId = userId;
+      await this.friendshipRepo.save(friendship);
+    } else if (friendship.blockedByUserId !== userId) {
+      throw new BadRequestException('This user is blocked by the other side');
+    } else {
+      friendship.blockedByUserId = userId;
       await this.friendshipRepo.save(friendship);
     }
 
@@ -323,6 +330,9 @@ export class FriendsService {
     const friendship = await this.findFriendshipRecord(userId, friendId);
     if (!friendship || friendship.status !== FriendshipStatus.BLOCKED) {
       throw new NotFoundException('Blocked relationship not found');
+    }
+    if (friendship.blockedByUserId !== userId) {
+      throw new BadRequestException('Only blocker can unblock this user');
     }
 
     await this.friendshipRepo.remove(friendship);

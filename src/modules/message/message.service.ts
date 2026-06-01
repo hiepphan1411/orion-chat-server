@@ -108,7 +108,7 @@ export class MessageService {
     fileName?: string;
     fileSize?: number;
   }) {
-    await this.chatMembershipService.assertConversationMember(
+    await this.chatMembershipService.assertConversationNotBlockedForMessaging(
       payload.senderBy,
       payload.conversationId,
     );
@@ -498,7 +498,7 @@ export class MessageService {
       throw new BadRequestException('Cannot forward revoked message');
     }
 
-    await this.chatMembershipService.assertConversationMember(
+    await this.chatMembershipService.assertConversationNotBlockedForMessaging(
       payload.forwardedBy,
       payload.targetConversationId,
     );
@@ -507,7 +507,7 @@ export class MessageService {
       (source as { conversationId?: string }).conversationId || '',
     );
     if (sourceConversationId) {
-      await this.chatMembershipService.assertConversationMember(
+      await this.chatMembershipService.assertConversationNotBlockedForMessaging(
         payload.forwardedBy,
         sourceConversationId,
       );

@@ -12,6 +12,10 @@ import {
 } from 'src/modules/conversation/entities/conversation.schema';
 import { ConversationParticipant } from 'src/modules/conversation/entities/conversation-participant.entity';
 import { GroupConversation } from 'src/modules/conversation/entities/group-conversation.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from 'src/modules/friendship/entities/friendship.entity';
 
 @Injectable()
 export class ChatMembershipService {
@@ -22,6 +26,8 @@ export class ChatMembershipService {
     private readonly participantRepo: Repository<ConversationParticipant>,
     @InjectRepository(GroupConversation)
     private readonly groupConversationRepo: Repository<GroupConversation>,
+    @InjectRepository(Friendship)
+    private readonly friendshipRepo: Repository<Friendship>,
   ) {}
 
   async assertConversationMember(
@@ -70,5 +76,77 @@ export class ChatMembershipService {
     }
 
     return conversation;
+  }
+
+  async assertConversationNotBlockedForMessaging(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const conversation = await this.assertConversationMember(
+      userId,
+      conversationId,
+    );
+
+    if (conversation.type !== ConversationType.PRIVATE) {
+      return;
+    }
+
+    const participants = await this.participantRepo.find({
+      where: { conversationId },
+      select: ['userId'],
+    });
+    const otherParticipant = participants.find((item) => item.userId !== userId);
+
+    if (otherParticipant) {
+      const blockedFriendship = await this.friendshipRepo.findOne({
+        where: [
+          {
+            userOne: { userId },
+            userTwo: { userId: otherParticipant.userId },
+            status: FriendshipStatus.BLOCKED,
+          },
+          {
+            userOne: { userId: otherParticipant.userId },
+            userTwo: { userId },
+            status: FriendshipStatus.BLOCKED,
+          },
+        ],
+      });
+
+      if (blockedFriendship) {
+        if (blockedFriendship.blockedByUserId === userId) {
+          throw new ForbiddenException(
+            'You blocked this user. Unblock them to send messages.',
+          );
+        }
+        throw new ForbiddenException(
+          'You cannot send messages because this user blocked you.',
+        );
+      }
+    }
+
+    const blockedParticipant = await this.participantRepo.findOne({
+      where: { conversationId, isBlocked: true },
+    });
+
+    if (!blockedParticipant) {
+      return;
+    }
+
+    if (blockedParticipant.userId === userId) {
+      throw new ForbiddenException(
+        'You are blocked from sending messages in this conversation.',
+      );
+    }
+
+    if (blockedParticipant.blockedBy === userId) {
+      throw new ForbiddenException(
+        'You blocked this user. Unblock them to send messages.',
+      );
+    }
+
+    throw new ForbiddenException(
+      'This conversation is blocked and cannot receive messages.',
+    );
   }
 }

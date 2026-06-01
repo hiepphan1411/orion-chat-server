@@ -13,6 +13,7 @@ import { NotificationModule } from '../notifications/notification.module';
 import { UsersModule } from '../users/users.module';
 import { ChatMembershipService } from './services/chat-membership.service';
 import { ChatMediaService } from './services/chat-media.service';
+import { Friendship } from '../friendship/entities/friendship.entity';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ChatMediaService } from './services/chat-media.service';
       ConversationParticipant,
       GroupConversation,
       GroupMember,
+      Friendship,
     ]),
   ],
   providers: [

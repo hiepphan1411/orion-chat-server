@@ -14,6 +14,7 @@ import { GroupsModule } from '../groups/groups.module';
 import { Message, MessageSchema } from '../message/message.schema';
 import { MessageModule } from '../message/message.module';
 import { User } from '../users/entities/user.entity';
+import { Friendship } from '../friendship/entities/friendship.entity';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { User } from '../users/entities/user.entity';
       GroupConversation,
       GroupMember,
       User,
+      Friendship,
     ]),
     MongooseModule.forFeature([{ name: Message.name, schema: MessageSchema }]),
     MessageModule,
