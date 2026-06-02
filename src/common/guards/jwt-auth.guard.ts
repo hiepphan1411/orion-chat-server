@@ -59,6 +59,55 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('User not found');
       }
 
+      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB
+      const platform = (request.headers['x-platform'] as string) || 'web';
+      const tokenMatchesWeb = user.webSessionToken === token;
+      const tokenMatchesMobile = user.mobileSessionToken === token;
+
+      // this.logger.log(
+      //   '[JWT Guard] Platform: ' +
+      //     platform +
+      //     ' | Web match: ' +
+      //     tokenMatchesWeb +
+      //     ' | Mobile match: ' +
+      //     tokenMatchesMobile,
+      // );
+
+      // Kiểm tra token phải khớp với session trong DB
+      if (!tokenMatchesWeb && !tokenMatchesMobile) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token không khớp bất kỳ session nào',
+        );
+        throw new UnauthorizedException(
+          'Phiên làm việc đã hết hạn hoặc bạn đã đăng nhập ở nơi khác',
+        );
+      }
+
+      // Kiểm tra platform-specific session
+      if (platform === 'web' && !tokenMatchesWeb) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token web không khớp (có thể đã login ở browser khác)',
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị web khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
+      if (platform === 'mobile' && !tokenMatchesMobile) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token mobile không khớp (có thể đã login ở mobile khác)',
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị mobile khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
       request.user = {
         userId: user.userId,
         phoneNumber: user.phoneNumber,

@@ -1,3 +1,4 @@
+/*eslint-disable */
 import {
   Injectable,
   NotFoundException,
@@ -53,10 +54,23 @@ export class UserSettingsService {
     const defaultSettings = this.settingsRepository.create({
       userId,
       theme: 'light',
+      appearanceColor: 'green',
       fontSize: 16,
       wallpaper: '',
       fontFamily: 'Inter',
       accentColor: '#3B82F6',
+      smartEmotionDetection: false,
+      autoWorkflowSuggestions: true,
+      aiMemoryEnabled: true,
+      enabledAgents: [
+        'core_assistant',
+        'task_agent',
+        'deadline_agent',
+        'sprint_summary',
+        'document_agent',
+        'knowledge_search',
+        'workspace_agent',
+      ],
     });
     return await this.settingsRepository.save(defaultSettings);
   }
@@ -66,7 +80,10 @@ export class UserSettingsService {
     updateUserSettingsDto: UpdateUserSettingsDto,
   ): Promise<UserSettings> {
     this.logger.log(`[UserSettings] Updating settings for userId: ${userId}`);
-    this.logger.debug(`[UserSettings] Update data:`, JSON.stringify(updateUserSettingsDto));
+    this.logger.debug(
+      `[UserSettings] Update data:`,
+      JSON.stringify(updateUserSettingsDto),
+    );
 
     const settings = await this.findByUserId(userId);
     this.logger.log(`[UserSettings] Found settings id: ${settings.id}`);
@@ -74,6 +91,9 @@ export class UserSettingsService {
     // Explicitly assign each field
     if (updateUserSettingsDto.theme !== undefined) {
       settings.theme = updateUserSettingsDto.theme;
+    }
+    if (updateUserSettingsDto.appearanceColor !== undefined) {
+      settings.appearanceColor = updateUserSettingsDto.appearanceColor;
     }
     if (updateUserSettingsDto.fontSize !== undefined) {
       settings.fontSize = updateUserSettingsDto.fontSize;
@@ -87,10 +107,29 @@ export class UserSettingsService {
     if (updateUserSettingsDto.wallpaper !== undefined) {
       settings.wallpaper = updateUserSettingsDto.wallpaper;
     }
+    if (updateUserSettingsDto.smartEmotionDetection !== undefined) {
+      settings.smartEmotionDetection =
+        updateUserSettingsDto.smartEmotionDetection;
+    }
+    if (updateUserSettingsDto.autoWorkflowSuggestions !== undefined) {
+      settings.autoWorkflowSuggestions =
+        updateUserSettingsDto.autoWorkflowSuggestions;
+    }
+    if (updateUserSettingsDto.aiMemoryEnabled !== undefined) {
+      settings.aiMemoryEnabled = updateUserSettingsDto.aiMemoryEnabled;
+    }
+    if (updateUserSettingsDto.enabledAgents !== undefined) {
+      settings.enabledAgents = updateUserSettingsDto.enabledAgents;
+    }
 
     const savedSettings = await this.settingsRepository.save(settings);
-    this.logger.log(`[UserSettings] Settings saved successfully for userId: ${userId}`);
-    this.logger.debug(`[UserSettings] Saved data:`, JSON.stringify(savedSettings));
+    this.logger.log(
+      `[UserSettings] Settings saved successfully for userId: ${userId}`,
+    );
+    this.logger.debug(
+      `[UserSettings] Saved data:`,
+      JSON.stringify(savedSettings),
+    );
 
     return savedSettings;
   }

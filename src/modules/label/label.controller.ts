@@ -13,21 +13,6 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
-/**
- * API Labels
- *
- * POST   /workspaces/:workspaceId/labels             → Tạo label mới
- *   - Body: { text, color, type }
- *   - type: 'FEATURE' | 'BUG' | 'DESIGN' | 'URGENT' | 'IMPROVEMENT'
- *
- * GET    /workspaces/:workspaceId/labels             → Danh sách labels
- *   - Trả về tất cả labels trong workspace
- *
- * PATCH  /workspaces/:workspaceId/labels/:id         → Cập nhật label
- *   - Body: bất kỳ field (text, color, type)
- *
- * DELETE /workspaces/:workspaceId/labels/:id         → Xóa label
- */
 @Controller('workspaces/:workspaceId/labels')
 @UseGuards(JwtAuthGuard)
 export class LabelController {

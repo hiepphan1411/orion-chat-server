@@ -20,9 +20,27 @@ import {
 import { CallActionDto, ToggleMediaDto } from './dto/call-action.dto';
 import { CallDocument } from './call.schema';
 
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Message, MessageDocument } from '../message/message.schema';
+import { ChatGateway } from '../message/chat.gateway';
+
 // map để tracking user online và socketId
 const onlineUsers = new Map<string, string>(); // userId -> socketId
-const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId},
+const activeCalls = new Map<string, { callerId: string; receiverId: string }>(); // callId -> {callerId, receiverId}
+// Group call tracking
+const activeGroupCalls = new Map<
+  string,
+  {
+    initiatorId: string;
+    participants: Set<string>;
+    conversationId: string;
+    callType: string;
+    participantNames: Map<string, string>;
+    participantAvatars: Map<string, string>;
+    startTime: number;
+  }
+>(); // callId -> group call info
 
 const socketAllowedOrigins = (
   process.env.SOCKET_ALLOWED_ORIGINS ||
@@ -45,7 +63,72 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private logger = new Logger('CallGateway');
 
-  constructor(private readonly callService: CallService) {}
+  // gửi sự kiện đến đúng các participant trong group call
+  private emitToGroupParticipants(
+    callId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ) {
+    const groupCall = activeGroupCalls.get(callId);
+    if (!groupCall) {
+      return;
+    }
+
+    for (const participantId of groupCall.participants) {
+      const participantSocketId = onlineUsers.get(participantId);
+      if (participantSocketId) {
+        this.server.to(participantSocketId).emit(event, payload);
+      }
+    }
+  }
+
+  constructor(
+    private readonly callService: CallService,
+    @InjectModel(Message.name)
+    private readonly messageModel: Model<MessageDocument>,
+    private readonly chatGateway: ChatGateway,
+  ) {}
+
+  private async completeActiveCallMessage(callId: string, duration: number) {
+    try {
+      this.logger.log(`Completing active call message for callId ${callId} with duration ${duration}`);
+      // Find the message with the callId and "active" status
+      const message = await this.messageModel.findOne({
+        'callData.callId': callId,
+        'callData.callStatus': 'active',
+      });
+
+      if (message && message.callData) {
+        message.callData.callStatus = 'completed';
+        message.callData.duration = duration;
+        await message.save();
+        this.logger.log(`Successfully completed active call message ${message._id}`);
+
+        // Phát tín hiệu update tin nhắn để UI các client đổi từ "Cuộc gọi nhóm đang diễn ra" -> "Cuộc gọi nhóm đã kết thúc"
+        this.chatGateway.emitNewMessage({
+          conversationId: message.conversationId,
+          messageId: message._id.toString(),
+          senderBy: message.senderBy,
+          content: message.content || '',
+          messageType: message.messageType || 'CALL',
+          createdAt: message.createdAt,
+          clientMessageId: message.clientMessageId,
+          messageStatus: message.messageStatus,
+          callData: {
+            callType: message.callData.callType as 'audio' | 'video',
+            callStatus: 'completed',
+            duration: duration,
+            isInitiator: message.callData.isInitiator,
+            wasRejected: message.callData.wasRejected,
+          },
+        });
+      } else {
+        this.logger.warn(`No active call message found with callId ${callId}`);
+      }
+    } catch (err) {
+      this.logger.error(`Error completing active call message:`, err);
+    }
+  }
 
   // xử lý khi client connect
   handleConnection(client: Socket) {
@@ -441,6 +524,420 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     } catch (error) {
       this.logger.error('Error responding video upgrade:', error);
+    }
+  }
+
+  // ===================== GROUP CALL HANDLERS =====================
+
+  // Group call event 1: initiate group call
+  @SubscribeMessage('groupcall:initiate')
+  async handleGroupCallInitiate(
+    @MessageBody()
+    data: {
+      conversationId: string;
+      participantIds: string[];
+      participantNames?: Record<string, string>; // Map of userId -> userName
+      participantAvatars?: Record<string, string>; // Map of userId -> userAvatar
+      callType: string;
+      initiatorName: string;
+      initiatorAvatar?: string;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const initiatorId = client.handshake.query.userId as string;
+      const {
+        conversationId,
+        participantIds,
+        participantNames,
+        participantAvatars,
+        callType,
+        initiatorName,
+        initiatorAvatar,
+      } = data;
+
+      this.logger.log(
+        `Group call initiated by ${initiatorId} for ${participantIds.length} participants`,
+      );
+
+      // Generate callId
+      const callId = `group-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Tạo group call record
+      const call: CallDocument = await this.callService.createCall(
+        conversationId,
+        CallType.GROUP,
+      );
+      const groupCallId = call._id.toString();
+
+      // Track active group call
+      const participants = new Set([initiatorId, ...participantIds]);
+      const participantNameMap = new Map<string, string>();
+      const participantAvatarMap = new Map<string, string>();
+
+      // lưu tên participant để đồng bộ UI giữa web/mobile
+      participantNameMap.set(
+        initiatorId,
+        initiatorName || `User ${initiatorId}`,
+      );
+      participantAvatarMap.set(
+        initiatorId,
+        initiatorAvatar || '',
+      );
+      for (const id of participantIds) {
+        participantNameMap.set(id, participantNames?.[id] || `User ${id}`);
+        participantAvatarMap.set(id, participantAvatars?.[id] || '');
+      }
+
+      activeGroupCalls.set(groupCallId, {
+        initiatorId,
+        participants,
+        conversationId,
+        callType,
+        participantNames: participantNameMap,
+        participantAvatars: participantAvatarMap,
+        startTime: Date.now(),
+      });
+
+      // Prepare participants data - use real names if provided, fallback to generic names
+      const participantsPayload = [
+        {
+          id: initiatorId,
+          name: participantNameMap.get(initiatorId) || `User ${initiatorId}`,
+          avatar: participantAvatarMap.get(initiatorId) || '',
+          isHost: true,
+        },
+        ...participantIds.map((id) => ({
+          id,
+          name: participantNameMap.get(id) || `User ${id}`,
+          avatar: participantAvatarMap.get(id) || '',
+          isHost: false,
+        })),
+      ];
+
+      this.logger.log(`Participants data:`, participantsPayload);
+
+      // Send call:initiated acknowledgment to initiator
+      client.emit('groupcall:initiated', {
+        callId: groupCallId,
+        participants: participantsPayload,
+      });
+
+      // Send incoming call notifications to all participants
+      for (const participantId of participantIds) {
+        const participantSocketId = onlineUsers.get(participantId);
+        if (participantSocketId) {
+          // Include all participant data (excluding themselves for client-side filtering)
+          this.server.to(participantSocketId).emit('groupcall:incoming', {
+            callId: groupCallId,
+            conversationId,
+            callType,
+            initiatorId,
+            initiatorName,
+            participants: participantsPayload,
+            participantCount: participantsPayload.length,
+          });
+        }
+      }
+
+      this.logger.log(`Group call ${groupCallId} initiated successfully`);
+    } catch (error) {
+      this.logger.error('Error initiating group call:', error);
+      client.emit('groupcall:error', {
+        message: 'Failed to initiate group call',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  // Group call event 2: join group call
+  @SubscribeMessage('groupcall:join')
+  handleGroupCallJoin(
+    @MessageBody()
+    data: {
+      callId: string;
+      conversationId: string;
+      userName?: string;
+      userAvatar?: string;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const userId = client.handshake.query.userId as string;
+      const { callId } = data;
+
+      const groupCall = activeGroupCalls.get(callId);
+      if (!groupCall) {
+        client.emit('groupcall:error', {
+          callId,
+          message: 'Group call not found',
+        });
+        return;
+      }
+
+      // Add user to participants + lưu tên để broadcast đồng bộ
+      groupCall.participants.add(userId);
+      groupCall.participantNames.set(
+        userId,
+        data.userName ||
+          groupCall.participantNames.get(userId) ||
+          `User ${userId}`,
+      );
+
+      if (!groupCall.participantAvatars) {
+        groupCall.participantAvatars = new Map<string, string>();
+      }
+      groupCall.participantAvatars.set(
+        userId,
+        data.userAvatar ||
+          groupCall.participantAvatars.get(userId) ||
+          '',
+      );
+
+      this.logger.log(`User ${userId} joined group call ${callId}`);
+
+      // Notify all participants that someone joined
+      const participantsList = Array.from(groupCall.participants).map((id) => ({
+        id,
+        name: groupCall.participantNames.get(id) || `User ${id}`,
+        avatar: groupCall.participantAvatars.get(id) || '',
+      }));
+
+      // chỉ broadcast trong nhóm hiện tại
+      this.emitToGroupParticipants(callId, 'groupcall:participant-joined', {
+        callId,
+        userId,
+        userName: groupCall.participantNames.get(userId) || `User ${userId}`,
+        userAvatar: groupCall.participantAvatars.get(userId) || '',
+        isHost: groupCall.initiatorId === userId,
+        participants: participantsList,
+      });
+    } catch (error) {
+      this.logger.error('Error joining group call:', error);
+      client.emit('groupcall:error', {
+        message: 'Failed to join group call',
+      });
+    }
+  }
+
+  // Group call event 3: send offer
+  @SubscribeMessage('groupcall:offer')
+  handleGroupCallOffer(
+    @MessageBody()
+    data: {
+      callId: string;
+      targetUserId: string;
+      offer: RTCSessionDescription;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, targetUserId, offer } = data;
+      const senderId = client.handshake.query.userId as string;
+
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (!targetSocketId) {
+        return;
+      }
+
+      this.server.to(targetSocketId).emit('groupcall:offer', {
+        callId,
+        callerId: senderId,
+        targetUserId,
+        offer,
+      });
+    } catch (error) {
+      this.logger.error('Error sending group call offer:', error);
+    }
+  }
+
+  // Group call event 4: send answer
+  @SubscribeMessage('groupcall:answer')
+  handleGroupCallAnswer(
+    @MessageBody()
+    data: {
+      callId: string;
+      targetUserId: string;
+      answer: RTCSessionDescription;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, targetUserId, answer } = data;
+      const senderId = client.handshake.query.userId as string;
+
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (!targetSocketId) {
+        return;
+      }
+
+      this.server.to(targetSocketId).emit('groupcall:answer', {
+        callId,
+        responderId: senderId,
+        targetUserId,
+        answer,
+      });
+    } catch (error) {
+      this.logger.error('Error sending group call answer:', error);
+    }
+  }
+
+  // Group call event 5: send ICE candidate
+  @SubscribeMessage('groupcall:ice-candidate')
+  handleGroupCallIceCandidate(
+    @MessageBody()
+    data: {
+      callId: string;
+      targetUserId: string;
+      candidate: RTCIceCandidate;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, targetUserId, candidate } = data;
+      const fromUserId = client.handshake.query.userId as string;
+
+      const targetSocketId = onlineUsers.get(targetUserId);
+      if (!targetSocketId) {
+        return;
+      }
+
+      this.server.to(targetSocketId).emit('groupcall:ice-candidate', {
+        callId,
+        fromUserId,
+        candidate,
+      });
+    } catch (error) {
+      this.logger.error('Error sending group call ICE candidate:', error);
+    }
+  }
+
+  // Group call event 6: toggle media
+  @SubscribeMessage('groupcall:toggle-media')
+  handleGroupCallToggleMedia(
+    @MessageBody()
+    data: {
+      callId: string;
+      mediaType: 'audio' | 'video';
+      enabled: boolean;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { callId, mediaType, enabled } = data;
+      const userId = client.handshake.query.userId as string;
+
+      const groupCall = activeGroupCalls.get(callId);
+      if (!groupCall) {
+        return;
+      }
+
+      // chỉ broadcast trong nhóm hiện tại để tránh nhiễu call khác
+      this.emitToGroupParticipants(callId, 'groupcall:media-toggled', {
+        callId,
+        userId,
+        mediaType,
+        enabled,
+      });
+    } catch (error) {
+      this.logger.error('Error toggling group call media:', error);
+    }
+  }
+
+  // Group call event 7: leave group call
+  @SubscribeMessage('groupcall:leave')
+  async handleGroupCallLeave(
+    @MessageBody() data: { callId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const userId = client.handshake.query.userId as string;
+      const { callId } = data;
+
+      const groupCall = activeGroupCalls.get(callId);
+      if (!groupCall) {
+        return;
+      }
+
+      // Remove participant
+      groupCall.participants.delete(userId);
+
+      // Notify remaining participants (not globally)
+      const remainingParticipants = Array.from(groupCall.participants);
+      for (const participantId of remainingParticipants) {
+        const participantSocketId = onlineUsers.get(participantId);
+        if (participantSocketId) {
+          this.server
+            .to(participantSocketId)
+            .emit('groupcall:participant-left', {
+              callId,
+              userId,
+              participantName:
+                groupCall.participantNames.get(userId) || `User ${userId}`,
+            });
+        }
+      }
+
+      // If no participants left, cleanup
+      if (groupCall.participants.size === 0) {
+        const duration = groupCall.startTime
+          ? Math.max(0, Math.floor((Date.now() - groupCall.startTime) / 1000))
+          : 0;
+        activeGroupCalls.delete(callId);
+        await this.callService.endCall(callId);
+        await this.completeActiveCallMessage(callId, duration);
+      }
+    } catch (error) {
+      this.logger.error('Error leaving group call:', error);
+    }
+  }
+
+  // Group call event 8: end group call (only host)
+  @SubscribeMessage('groupcall:end')
+  async handleGroupCallEnd(
+    @MessageBody() data: { callId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const userId = client.handshake.query.userId as string;
+      const { callId } = data;
+
+      const groupCall = activeGroupCalls.get(callId);
+      if (!groupCall) {
+        return;
+      }
+
+      // Only initiator can end call
+      if (groupCall.initiatorId !== userId) {
+        client.emit('groupcall:error', {
+          callId,
+          message: 'Only host can end group call',
+        });
+        return;
+      }
+
+      // Notify all participants in this group call (not globally)
+      const allParticipants = Array.from(groupCall.participants);
+      for (const participantId of allParticipants) {
+        const participantSocketId = onlineUsers.get(participantId);
+        if (participantSocketId) {
+          this.server.to(participantSocketId).emit('groupcall:ended', {
+            callId,
+            endedBy: userId,
+            reason: 'host_ended',
+          });
+        }
+      }
+
+      // Cleanup
+      const duration = groupCall.startTime
+        ? Math.max(0, Math.floor((Date.now() - groupCall.startTime) / 1000))
+        : 0;
+      activeGroupCalls.delete(callId);
+      await this.callService.endCall(callId);
+      await this.completeActiveCallMessage(callId, duration);
+    } catch (error) {
+      this.logger.error('Error ending group call:', error);
     }
   }
 }

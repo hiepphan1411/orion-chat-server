@@ -18,7 +18,10 @@ export class UserSettings {
 
   // Appearance Settings
   @Column({ type: 'varchar', nullable: true, default: 'light' })
-  theme: string; // light, dark, auto
+  theme: string; // light, dark, default
+
+  @Column({ type: 'varchar', nullable: true, default: 'green' })
+  appearanceColor: string; // orange, blue, green, etc.
 
   @Column({ type: 'int', nullable: true, default: 16 })
   fontSize: number; // 12-24
@@ -32,6 +35,18 @@ export class UserSettings {
 
   @Column({ type: 'varchar', nullable: true })
   accentColor: string;
+
+  @Column({ type: 'boolean', default: false })
+  smartEmotionDetection: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  autoWorkflowSuggestions: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  aiMemoryEnabled: boolean;
+
+  @Column('simple-array', { nullable: true })
+  enabledAgents: string[];
 
   @CreateDateColumn()
   createdAt: Date;

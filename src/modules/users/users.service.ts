@@ -140,6 +140,7 @@ export class UsersService {
     if (updateUserDto.birthDate)
       user.birthDate = new Date(updateUserDto.birthDate);
     if (updateUserDto.email) user.email = updateUserDto.email;
+    if (updateUserDto.phoneNumber) user.phoneNumber = updateUserDto.phoneNumber;
 
     // Handle uploaded files
     if (uploadedFiles?.avatar) {

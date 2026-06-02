@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable*/
 import {
   Injectable,
   NotFoundException,
@@ -12,11 +12,29 @@ import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { MessageType } from 'src/common/enums/message-type.enum';
 import { Conversation, ConversationType } from './entities/conversation.schema';
-import { ConversationParticipant } from './entities/conversation-participant.entity';
+import {
+  ConversationParticipant,
+  ParticipantRole,
+} from './entities/conversation-participant.entity';
+import { GroupConversation } from './entities/group-conversation.entity';
 import { Message, MessageDocument } from '../message/message.schema'; // Import schema Mongo
 import { User } from '../users/entities/user.entity';
+import {
+  GroupMember,
+  GroupMemberRole,
+} from '../group-member/entities/group-member.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from '../friendship/entities/friendship.entity';
+
+const bcryptLib = bcrypt as unknown as {
+  hash: (value: string, saltRounds: number) => Promise<string>;
+  compare: (value: string, hash: string) => Promise<boolean>;
+};
 
 type MessageDetail = {
+  _id?: string;
   content?: string;
   senderBy?: string;
   senderName?: string;
@@ -28,15 +46,24 @@ type MessageDetail = {
   isPinned?: boolean;
   isDeleted?: boolean;
   isRevoked?: boolean;
+  deletedByAdmin?: boolean;
+  adminDeletedBy?: string;
+  adminDeletedAt?: Date | string;
   revokedBy?: string;
   revokedAt?: Date | string;
   replyToMessageId?: string | null;
+  reactions?: Array<{
+    userId: string;
+    emoji: string;
+    reactedAt: Date | string;
+  }>;
   seenBy?: Array<{ userId: string; seenAt: Date | string }>;
   createdAt?: Date | string;
   updatedAt?: Date | string;
   mediaUrl?: string;
   fileName?: string;
   fileSize?: number;
+  mimeType?: string;
   callData?: {
     callType?: 'audio' | 'video';
     callStatus?: 'completed' | 'missed' | 'declined';
@@ -53,13 +80,60 @@ type LastMessageAggregateRow = {
 
 type ConversationMessagesResult = {
   conversationId: string;
-  items: MessageDetail[];
+  items: Array<{
+    id: string;
+    conversationId: string;
+    senderId: string;
+    senderBy: string; // For mobile comparison
+    senderName?: string;
+    senderAvatar?: string;
+    content: string;
+    messageType?: string;
+    callData?: {
+      callType?: 'audio' | 'video';
+      callStatus?: 'completed' | 'missed' | 'declined';
+      duration?: number;
+      isInitiator?: boolean;
+      wasRejected?: boolean;
+    } | null;
+    reactions: Array<{
+      userId: string;
+      emoji: string;
+      reactedAt: Date | string;
+    }>;
+    mediaUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
+    attachments: Array<{
+      mediaUrl?: string;
+      fileName?: string;
+      fileSize?: number;
+      mimeType?: string;
+    }>;
+    createdAt: Date | string;
+    isPinned: boolean;
+    recalled: boolean;
+    isRevoked: boolean;
+    deletedByAdmin: boolean;
+    replyToMessageId: string | null;
+    replyToMessagePreview?: {
+      messageId: string;
+      content: string;
+      senderName: string;
+      snippet: string;
+      createdAt: Date | string | null;
+    };
+    canRecall: boolean;
+    canAdminDelete: boolean;
+  }>;
   nextCursor: string | null;
 };
 
 type ConversationView = {
   conversationId: string;
   type: string;
+  conversationStatus: 'active' | 'dissolved' | 'left_or_removed';
   autoDeleteDuration: number;
   createdAt: Date;
   myRole: string;
@@ -69,11 +143,16 @@ type ConversationView = {
   myBlockedAt?: Date | null;
   myBlockedBy?: string | null;
   lastMessage: {
+    messageId?: string;
+    _id?: string;
+    clientMessageId?: string;
     content?: string;
     messageType?: string;
     senderBy?: string;
     createdAt?: Date | string;
     messageStatus?: string;
+    isRecalled?: boolean;
+    isRevoked?: boolean;
   } | null;
   groupInfo: {
     groupName: string;
@@ -90,6 +169,7 @@ type ConversationView = {
   participants: Array<{
     userId: string;
     fullName: string | null;
+    nickname?: string | null;
     avatarUrl: string | null;
     role: any;
     joinedAt: Date;
@@ -116,11 +196,44 @@ export class ConversationService {
     private readonly conversationRepo: Repository<Conversation>,
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
+    @InjectRepository(GroupMember)
+    private readonly groupMemberRepo: Repository<GroupMember>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Friendship)
+    private readonly friendshipRepo: Repository<Friendship>,
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
   ) {}
+
+  private async assertNoBlockedFriendship(userId: string, otherUserId: string) {
+    const blockedFriendship = await this.friendshipRepo.findOne({
+      where: [
+        {
+          userOne: { userId },
+          userTwo: { userId: otherUserId },
+          status: FriendshipStatus.BLOCKED,
+        },
+        {
+          userOne: { userId: otherUserId },
+          userTwo: { userId },
+          status: FriendshipStatus.BLOCKED,
+        },
+      ],
+    });
+
+    if (blockedFriendship) {
+      const blockedBy = blockedFriendship.blockedByUserId;
+      if (blockedBy === userId) {
+        throw new ForbiddenException(
+          'You blocked this user. Unblock to continue chatting.',
+        );
+      }
+      throw new ForbiddenException(
+        'You cannot chat with this user because they blocked you.',
+      );
+    }
+  }
 
   async findAllByUserId(userId: string) {
     const memberships = await this.participantRepo.find({
@@ -128,6 +241,8 @@ export class ConversationService {
       relations: [
         'conversation',
         'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
@@ -143,6 +258,22 @@ export class ConversationService {
     const conversationIds = memberships.map(
       (m) => m.conversation.conversationId,
     );
+
+    const groupMemberships = await this.groupMemberRepo.find({
+      where: {
+        user: { userId },
+        group: { conversationId: In(conversationIds) },
+      },
+      relations: ['group'],
+    });
+
+    const groupMembershipMap = new Map<string, GroupMember>();
+    for (const groupMembership of groupMemberships) {
+      groupMembershipMap.set(
+        groupMembership.group.conversationId,
+        groupMembership,
+      );
+    }
 
     const messageMap = await this.getLastMessageMap(conversationIds, userId);
 
@@ -165,13 +296,44 @@ export class ConversationService {
       const convId = m.conversation.conversationId;
       const latestMsg = messageMap.get(convId);
       const blockStatus = blockStatusMap.get(convId);
+      const conversationStatus = this.resolveConversationStatus(
+        m,
+        groupMembershipMap.get(convId),
+      );
 
-      return this.toConversationView(m, latestMsg ?? null, blockStatus);
+      return this.toConversationView(
+        m,
+        latestMsg ?? null,
+        blockStatus,
+        conversationStatus,
+      );
     });
   }
 
   async findDetailById(conversationId: string, userId: string) {
-    const membership = await this.requireMembership(conversationId, userId);
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+      relations: [
+        'conversation',
+        'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
+        'conversation.participants',
+        'conversation.participants.user',
+      ],
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const groupMembership = await this.groupMemberRepo.findOne({
+      where: {
+        group: { conversationId },
+        user: { userId },
+      },
+      relations: ['group'],
+    });
 
     const lastMessageArr = await this.fetchConversationMessages(
       conversationId,
@@ -184,8 +346,49 @@ export class ConversationService {
 
     // ✅ Lấy block status của conversation
     const blockStatus = await this.getConversationBlockStatus(conversationId);
+    const conversationStatus = this.resolveConversationStatus(
+      membership,
+      groupMembership,
+    );
 
-    return this.toConversationView(membership, latestMsg, blockStatus);
+    return this.toConversationView(
+      membership,
+      latestMsg,
+      blockStatus,
+      conversationStatus,
+    );
+  }
+
+  async deleteConversationForUser(conversationId: string, userId: string) {
+    const membership = await this.participantRepo.findOne({
+      where: { conversationId, userId },
+      relations: ['conversation'],
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (membership.conversation.type !== ConversationType.PRIVATE) {
+      throw new BadRequestException(
+        'Only private conversations can be deleted via this endpoint',
+      );
+    }
+
+    await this.participantRepo.delete({ conversationId, userId });
+
+    const remainingParticipants = await this.participantRepo.count({
+      where: { conversationId },
+    });
+
+    if (remainingParticipants === 0) {
+      await this.conversationRepo.delete({ conversationId });
+    }
+
+    return {
+      success: true,
+      conversationId,
+    };
   }
 
   /**
@@ -204,9 +407,9 @@ export class ConversationService {
       );
     }
 
-      if (currentUserId === recipientId) {
-          throw new BadRequestException('Cannot create conversation with yourself');
-      }
+    if (currentUserId === recipientId) {
+      throw new BadRequestException('Cannot create conversation with yourself');
+    }
 
     // Validate UUIDs
     this.validateUUID(currentUserId, 'currentUserId');
@@ -221,38 +424,33 @@ export class ConversationService {
       throw new NotFoundException(`Recipient not found: ${recipientId}`);
     }
 
-    // Try to find existing PRIVATE conversation
-    const existingConversations = await this.participantRepo.find({
-      where: { userId: currentUserId },
-      relations: ['conversation', 'conversation.participants'],
-    });
+    await this.assertNoBlockedFriendship(currentUserId, recipientId);
 
-    const existingPrivate = existingConversations.find((conv) => {
-      const conversation = conv.conversation;
+    // Try to find existing PRIVATE conversation containing both participants
+    const existingConversation = await this.conversationRepo
+      .createQueryBuilder('conversation')
+      .innerJoin(
+        'conversation.participants',
+        'p1',
+        'p1.userId = :currentUserId',
+        { currentUserId },
+      )
+      .innerJoin(
+        'conversation.participants',
+        'p2',
+        'p2.userId = :recipientId',
+        { recipientId },
+      )
+      .where('conversation.type = :type', {
+        type: ConversationType.PRIVATE,
+      })
+      .getOne();
 
-      // Must be PRIVATE type
-      if (conversation.type !== ConversationType.PRIVATE) return false;
-
-      // Check if other participant is recipientId
-      return conversation.participants.length === 2;
-    });
-
-    if (existingPrivate) {
-      // Verify the other participant is recipientId
-      const otherParticipantExists = await this.participantRepo.findOne({
-        where: {
-          conversationId: existingPrivate.conversation.conversationId,
-          userId: recipientId,
-        },
-      });
-
-      if (otherParticipantExists) {
-        // Return existing conversation detail
-        return this.findDetailById(
-          existingPrivate.conversation.conversationId,
-          currentUserId,
-        );
-      }
+    if (existingConversation) {
+      return this.findDetailById(
+        existingConversation.conversationId,
+        currentUserId,
+      );
     }
 
     // Create NEW private conversation
@@ -281,6 +479,9 @@ export class ConversationService {
       },
       relations: [
         'conversation',
+        'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
@@ -297,13 +498,126 @@ export class ConversationService {
     return this.toConversationView(membership, null, blockStatus);
   }
 
+  async createGroupConversation(payload: {
+    creatorId: string;
+    groupName: string;
+    memberIds?: string[];
+    memberNicknames?: Array<{ userId: string; nickname?: string }>;
+  }): Promise<ConversationView> {
+    const creatorId = String(payload.creatorId || '').trim();
+    const groupName = String(payload.groupName || '').trim();
+
+    if (!creatorId) {
+      throw new BadRequestException('creatorId is required');
+    }
+
+    if (!groupName || groupName.length < 2) {
+      throw new BadRequestException('groupName must be at least 2 characters');
+    }
+
+    this.validateUUID(creatorId, 'creatorId');
+
+    const rawMemberIds = Array.isArray(payload.memberIds)
+      ? payload.memberIds
+      : [];
+    const uniqueMemberIds = [...new Set(rawMemberIds.filter(Boolean))];
+    const normalizedMemberIds = uniqueMemberIds.filter(
+      (id) => id !== creatorId,
+    );
+    const allParticipantIds = [creatorId, ...normalizedMemberIds];
+
+    if (normalizedMemberIds.length < 2) {
+      throw new BadRequestException(
+        'Nhóm phải có ít nhất 3 thành viên (bao gồm cả bạn)',
+      );
+    }
+
+    console.log('[createGroupConversation] Creating group:', {
+      groupName,
+      creatorId,
+      selectedMembers: normalizedMemberIds.length,
+      allParticipantsCount: allParticipantIds.length,
+      normalizedMemberIds,
+    });
+
+    for (const userId of allParticipantIds) {
+      this.validateUUID(userId, 'memberId');
+    }
+
+    const users = await this.userRepo.find({
+      where: { userId: In(allParticipantIds) },
+    });
+
+    if (users.length !== allParticipantIds.length) {
+      throw new NotFoundException('One or more members not found');
+    }
+
+    const nicknameMap = new Map<string, string>();
+    for (const item of payload.memberNicknames || []) {
+      const userId = String(item.userId || '').trim();
+      const nickname = String(item.nickname || '').trim();
+
+      if (!userId || !nickname) continue;
+      if (!allParticipantIds.includes(userId)) continue;
+
+      nicknameMap.set(userId, nickname.slice(0, 50));
+    }
+
+    const createdConversationId =
+      await this.conversationRepo.manager.transaction(async (manager) => {
+        const conversation = manager.create(Conversation, {
+          type: ConversationType.GROUP,
+        });
+        const savedConversation = await manager.save(
+          Conversation,
+          conversation,
+        );
+
+        const groupConversation = manager.create(GroupConversation, {
+          conversationId: savedConversation.conversationId,
+          groupName,
+          ownerId: creatorId,
+        });
+        await manager.save(GroupConversation, groupConversation);
+
+        const participants = allParticipantIds.map((userId) =>
+          manager.create(ConversationParticipant, {
+            conversationId: savedConversation.conversationId,
+            userId,
+            role:
+              userId === creatorId
+                ? ParticipantRole.ADMIN
+                : ParticipantRole.MEMBER,
+          }),
+        );
+        await manager.save(ConversationParticipant, participants);
+
+        const groupMembers = allParticipantIds.map((userId) =>
+          manager.create(GroupMember, {
+            group: { conversationId: savedConversation.conversationId },
+            user: { userId },
+            role:
+              userId === creatorId
+                ? GroupMemberRole.OWNER
+                : GroupMemberRole.MEMBER,
+            nickname: nicknameMap.get(userId) || null,
+          }),
+        );
+        await manager.save(GroupMember, groupMembers);
+
+        return savedConversation.conversationId;
+      });
+
+    return this.findDetailById(createdConversationId, creatorId);
+  }
+
   async getMessagesByConversation(
     conversationId: string,
     userId: string,
     cursor?: string,
     limit = 30,
   ): Promise<ConversationMessagesResult> {
-    await this.requireMembership(conversationId, userId);
+    const membership = await this.requireMembership(conversationId, userId);
 
     const pageSize = Math.min(Math.max(limit, 1), 100);
     const items = await this.fetchConversationMessages(
@@ -313,6 +627,161 @@ export class ConversationService {
       userId,
     );
 
+    const adminRoles = [
+      GroupMemberRole.OWNER,
+      GroupMemberRole.ADMIN,
+      GroupMemberRole.CO_ADMIN,
+    ];
+
+    let canManageAsAdmin = false;
+    if (membership.conversation.type === ConversationType.GROUP) {
+      const myGroupMember = await this.groupMemberRepo.findOne({
+        where: {
+          group: { conversationId },
+          user: { userId },
+        },
+      });
+
+      canManageAsAdmin =
+        !!myGroupMember && adminRoles.includes(myGroupMember.role);
+    }
+
+    const replyToIds = [
+      ...new Set(items.map((m) => m.replyToMessageId).filter(Boolean)),
+    ] as string[];
+
+    const replyPreviewMap = new Map<
+      string,
+      {
+        messageId: string;
+        content: string;
+        senderName: string;
+        snippet: string;
+        createdAt: Date | string | null;
+      }
+    >();
+
+    if (replyToIds.length > 0) {
+      const replyMessages = await this.messageModel
+        .find({
+          _id: { $in: replyToIds },
+          conversationId,
+          isDeleted: false,
+        })
+        .lean<
+          Array<{
+            _id: unknown;
+            senderBy: string;
+            content?: string;
+            createdAt?: Date | string;
+          }>
+        >();
+
+      const senderIds = [...new Set(replyMessages.map((m) => m.senderBy))];
+      const senderUsers = await this.userRepo.find({
+        where: { userId: In(senderIds) },
+      });
+      const senderMap = new Map(senderUsers.map((u) => [u.userId, u.fullName]));
+
+      for (const msg of replyMessages) {
+        const snippet = String(msg.content || '').slice(0, 100);
+        replyPreviewMap.set(String(msg._id), {
+          messageId: String(msg._id),
+          content: String(msg.content || ''),
+          senderName: senderMap.get(msg.senderBy) || 'Unknown',
+          snippet,
+          createdAt: this.toDate(msg.createdAt) || msg.createdAt || null,
+        });
+      }
+    }
+
+    const nowMs = Date.now();
+    const windowMs = 24 * 60 * 60 * 1000;
+
+    // DEBUG: Log media messages
+    const mediaMessages = items.filter((item) =>
+      ['FILE', 'IMAGE', 'VIDEO'].includes(
+        String(item.messageType || 'TEXT').toUpperCase(),
+      ),
+    );
+
+    // if (mediaMessages.length > 0) {
+    //   console.log('[getMessages] Found media messages:', {
+    //     count: mediaMessages.length,
+    //     conversationId,
+    //     messages: mediaMessages.map((msg) => ({
+    //       messageId: String(msg._id),
+    //       messageType: String(msg.messageType || 'TEXT').toUpperCase(),
+    //       fileName: msg.fileName,
+    //       mediaUrl: msg.mediaUrl ? 'Has URL' : 'No URL',
+    //       fileSize: msg.fileSize,
+    //     })),
+    //   });
+    // }
+
+    const mappedItems = items.map((item) => {
+      const createdAtDate = this.toDate(item.createdAt) || new Date(0);
+      const within24Hours = nowMs - createdAtDate.getTime() <= windowMs;
+      const senderId = String(item.senderBy || '');
+      const isOwnMessage = senderId === userId;
+      const recalled = !!item.isRevoked;
+      const deletedByAdmin = !!item.deletedByAdmin;
+      const messageId = String(item._id || '');
+
+      return {
+        _id: messageId, // MongoDB ID for mobile
+        id: messageId, // Also provide as id for consistency
+        conversationId,
+        senderId,
+        senderBy: senderId, // Mobile expects senderBy for comparison
+        senderName: item.senderName || 'Unknown',
+        senderAvatar: item.senderAvatar || undefined,
+        content: recalled
+          ? 'Tin nhắn đã được thu hồi'
+          : String(item.content || ''),
+        messageType: item.messageType,
+        callData: item.callData || null,
+        reactions: Array.isArray(item.reactions)
+          ? item.reactions.map((reaction) => ({
+              userId: String(reaction.userId || ''),
+              emoji: String(reaction.emoji || ''),
+              reactedAt: this.toDate(reaction.reactedAt) || reaction.reactedAt,
+            }))
+          : [],
+        mediaUrl: item.mediaUrl,
+        fileName: item.fileName,
+        fileSize: item.fileSize,
+        mimeType: item.mimeType,
+        attachments: item.mediaUrl
+          ? [
+              {
+                mediaUrl: item.mediaUrl,
+                fileName: item.fileName,
+                fileSize: item.fileSize,
+                mimeType: item.mimeType,
+              },
+            ]
+          : [],
+        createdAt: createdAtDate,
+        isPinned: !!item.isPinned,
+        recalled,
+        isRevoked: recalled,
+        deletedByAdmin,
+        replyToMessageId: item.replyToMessageId || null,
+        replyToMessagePreview: item.replyToMessageId
+          ? replyPreviewMap.get(item.replyToMessageId) || undefined
+          : undefined,
+        canRecall:
+          isOwnMessage && within24Hours && !recalled && !deletedByAdmin,
+        canAdminDelete:
+          canManageAsAdmin &&
+          !isOwnMessage &&
+          within24Hours &&
+          !recalled &&
+          !deletedByAdmin,
+      };
+    });
+
     const lastItem = items[items.length - 1];
     const nextCursor =
       items.length === pageSize && this.toDate(lastItem?.createdAt)
@@ -321,7 +790,7 @@ export class ConversationService {
 
     return {
       conversationId,
-      items,
+      items: mappedItems,
       nextCursor,
     };
   }
@@ -331,18 +800,49 @@ export class ConversationService {
     actorUserId: string,
     payload: CreateConversationMessagePayload,
   ): Promise<MessageDocument> {
-    // ✅ Verify user là member của conversation (throws nếu không phải member)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // Verify user là member của conversation (throws nếu không phải member)
+
     const _membership = await this.requireMembership(
       conversationId,
       actorUserId,
     );
 
+    if (_membership.conversation.type === ConversationType.PRIVATE) {
+      const otherParticipant = _membership.conversation.participants.find(
+        (participant) => participant.userId !== actorUserId,
+      );
+
+      if (otherParticipant?.userId) {
+        await this.assertNoBlockedFriendship(
+          actorUserId,
+          otherParticipant.userId,
+        );
+      }
+    }
+
     if (payload.senderBy !== actorUserId) {
       throw new ForbiddenException('senderBy must match userId');
     }
 
-    // ✅ Kiểm tra trạng thái chặn của conversation
+    if (payload.replyToMessageId) {
+      const replyTarget = await this.messageModel
+        .findOne({
+          _id: payload.replyToMessageId,
+          conversationId,
+          isDeleted: false,
+        })
+        .select('_id')
+        .lean<{ _id: unknown } | null>()
+        .exec();
+
+      if (!replyTarget) {
+        throw new NotFoundException(
+          'Reply target message not found in this conversation',
+        );
+      }
+    }
+
+    // Kiểm tra trạng thái chặn của conversation
     const blockStatus = await this.getConversationBlockStatus(conversationId);
 
     // Nếu conversation bị chặn
@@ -404,12 +904,36 @@ export class ConversationService {
       relations: [
         'conversation',
         'conversation.groupInfo',
+        'conversation.groupInfo.members',
+        'conversation.groupInfo.members.user',
         'conversation.participants',
         'conversation.participants.user',
       ],
     });
 
     if (membership) {
+      // console.log('[requireMembership] Loaded conversation:', {
+      //   conversationId,
+      //   participantsCount: membership.conversation.participants?.length,
+      //   conversationType: membership.conversation.type,
+      // });
+
+      // Re-fetch participants to ensure we get ALL of them
+      // TypeORM relations may not load complete arrays reliably
+      if (membership.conversation.type === 'GROUP') {
+        const allParticipants = await this.participantRepo.find({
+          where: { conversationId },
+          relations: ['user'],
+        });
+        membership.conversation.participants = allParticipants;
+        // console.log('[requireMembership] Re-fetched all participants:', {
+        //   participantsCount: allParticipants.length,
+        // });
+      }
+      if (membership.conversation.groupInfo?.isDissolved) {
+        throw new ForbiddenException('GROUP_DISSOLVED');
+      }
+
       return membership;
     }
 
@@ -644,6 +1168,7 @@ export class ConversationService {
   private normalizeMessage(message: MessageDetail): MessageDetail {
     return {
       ...message,
+      _id: message._id ? String(message._id) : undefined,
       createdAt: this.toDate(message.createdAt) || message.createdAt,
       updatedAt: this.toDate(message.updatedAt) || message.updatedAt,
       seenBy: Array.isArray(message.seenBy)
@@ -704,20 +1229,30 @@ export class ConversationService {
       blockedBy: string | null;
       blockedAt: Date | null;
     },
+    conversationStatus: 'active' | 'dissolved' | 'left_or_removed' = 'active',
   ) {
     const c = membership.conversation;
+    const groupNicknameMap = new Map<string, string | null>();
+
+    if (Array.isArray(c.groupInfo?.members)) {
+      for (const groupMember of c.groupInfo.members) {
+        const memberUserId = groupMember?.user?.userId;
+        if (!memberUserId) continue;
+        groupNicknameMap.set(memberUserId, groupMember.nickname || null);
+      }
+    }
 
     return {
       conversationId: c.conversationId,
       type: c.type,
+      conversationStatus,
       autoDeleteDuration: c.autoDeleteDuration,
       createdAt: c.createdAt,
       myRole: membership.role,
       myJoinedAt: membership.joinedAt,
-      // ✅ Security status của current user
       myIsHidden: membership.isHidden,
       myIsBlocked:
-        blockStatus?.isBlocked &&
+        !!blockStatus?.isBlocked &&
         blockStatus?.blockedUserId === membership.userId,
       myBlockedAt:
         blockStatus?.isBlocked &&
@@ -731,11 +1266,18 @@ export class ConversationService {
           : null,
       lastMessage: latestMsg
         ? {
-            content: latestMsg.content,
+            messageId: latestMsg._id ? String(latestMsg._id) : undefined,
+            _id: latestMsg._id ? String(latestMsg._id) : undefined,
+            clientMessageId: latestMsg.clientMessageId,
+            content: latestMsg.isRevoked
+              ? 'Tin nhắn đã được thu hồi'
+              : latestMsg.content,
             messageType: latestMsg.messageType,
             senderBy: latestMsg.senderBy,
             createdAt: latestMsg.createdAt,
             messageStatus: latestMsg.messageStatus,
+            isRecalled: !!latestMsg.isRevoked,
+            isRevoked: !!latestMsg.isRevoked,
           }
         : null,
       groupInfo: c.groupInfo
@@ -745,34 +1287,49 @@ export class ConversationService {
             ownerId: c.groupInfo.ownerId,
           }
         : null,
-      // ✅ Trạng thái CHẶN của cuộc hội thoại (ai chặn ai)
       blockStatus: blockStatus || {
         isBlocked: false,
         blockedUserId: null,
         blockedBy: null,
         blockedAt: null,
       },
-      // ✅ Current user có thể bỏ chặn không (chỉ người chặn mới có thể bỏ chặn)
       canUnblock:
-        blockStatus?.isBlocked && blockStatus?.blockedBy === membership.userId,
-      // ==================== Pin Status ====================
+        !!blockStatus?.isBlocked &&
+        blockStatus?.blockedBy === membership.userId,
       myIsPinned: membership.isPinned,
       myPinnedAt: membership.pinnedAt,
-      // Danh sách participants
       participants: c.participants.map((p) => ({
         userId: p.userId,
         fullName: p.user?.fullName ?? null,
+        nickname: groupNicknameMap.get(p.userId) ?? null,
         avatarUrl: p.user?.avatarUrl ?? null,
         role: p.role,
         joinedAt: p.joinedAt,
         lastReadMessageId: p.lastReadMessageId,
         isHidden: p.isHidden,
-        // ✅ Block status của participant khác
         isBlocked: p.isBlocked,
         blockedAt: p.blockedAt,
         blockedBy: p.blockedBy,
       })),
     };
+  }
+
+  private resolveConversationStatus(
+    membership: ConversationParticipant,
+    groupMembership?: GroupMember | null,
+  ): 'active' | 'dissolved' | 'left_or_removed' {
+    if (membership.conversation.groupInfo?.isDissolved) {
+      return 'dissolved';
+    }
+
+    if (
+      membership.conversation.type === ConversationType.GROUP &&
+      (!groupMembership || groupMembership.user.userId !== membership.userId)
+    ) {
+      return 'left_or_removed';
+    }
+
+    return 'active';
   }
 
   // ==================== SECURITY FEATURES ====================
@@ -820,7 +1377,7 @@ export class ConversationService {
     }
 
     // Hash mật khẩu bằng bcrypt (salt rounds = 10)
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcryptLib.hash(password, 10);
 
     // Cập nhật vào database
     await this.participantRepo.update(
@@ -832,6 +1389,28 @@ export class ConversationService {
       success: true,
       conversationId,
       message: 'Conversation hidden successfully',
+    };
+  }
+
+  async setConversationHidden(
+    conversationId: string,
+    userId: string,
+    hidden: boolean,
+  ) {
+    await this.requireMembership(conversationId, userId);
+
+    await this.participantRepo.update(
+      { conversationId, userId },
+      {
+        isHidden: hidden,
+        hidePasswordHash: null,
+      },
+    );
+
+    return {
+      conversationId,
+      hidden,
+      updatedAt: new Date().toISOString(),
     };
   }
 
@@ -854,7 +1433,7 @@ export class ConversationService {
     }
 
     // Verify mật khẩu
-    const isPasswordValid = await bcrypt.compare(
+    const isPasswordValid = await bcryptLib.compare(
       password,
       membership.hidePasswordHash || '',
     );
@@ -920,7 +1499,7 @@ export class ConversationService {
       return false;
     }
 
-    return bcrypt.compare(password, membership.hidePasswordHash || '');
+    return bcryptLib.compare(password, membership.hidePasswordHash || '');
   }
 
   /**

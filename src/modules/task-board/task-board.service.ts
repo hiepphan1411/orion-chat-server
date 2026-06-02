@@ -1,12 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TaskBoard } from './entities/task-board.entity';
 import { BoardColumn } from '../board-column/entities/board-column.entity';
 import { Workspace } from '../workspace/entities/workspace.entity';
+import { WorkspaceMember } from '../workspace-member/entities/workspace-member.entity';
 import { CreateTaskBoardDto } from './dto/create-task-board.dto';
 import { UpdateTaskBoardDto } from './dto/update-task-board.dto';
 import { TaskStatus } from 'src/common/enums/task-status.enum';
+import { WorkspaceRole } from 'src/common/enums/workspace-role.enum';
 
 @Injectable()
 export class TaskBoardService {
@@ -17,13 +19,29 @@ export class TaskBoardService {
     private columnRepo: Repository<BoardColumn>,
     @InjectRepository(Workspace)
     private workspaceRepo: Repository<Workspace>,
+    @InjectRepository(WorkspaceMember)
+    private memberRepo: Repository<WorkspaceMember>,
   ) {}
+
+  private async assertManager(workspaceId: string, actorId?: string) {
+    if (!actorId) return;
+    const member = await this.memberRepo.findOne({
+      where: { workspace: { workspaceId }, user: { userId: actorId } },
+    });
+    if (
+      member?.role !== WorkspaceRole.OWNER &&
+      member?.role !== WorkspaceRole.ADMIN
+    ) {
+      throw new ForbiddenException('Only workspace owner/admin can manage boards');
+    }
+  }
 
   /**
    * Tạo board mới trong workspace
    * - Tự động tạo 4 columns mặc định: To Do, In Progress, Review, Done
    */
-  async create(workspaceId: string, dto: CreateTaskBoardDto) {
+  async create(workspaceId: string, dto: CreateTaskBoardDto, actorId?: string) {
+    await this.assertManager(workspaceId, actorId);
     const workspace = await this.workspaceRepo.findOne({
       where: { workspaceId },
     });
@@ -95,7 +113,13 @@ export class TaskBoardService {
   /**
    * Cập nhật board (partial update)
    */
-  async update(workspaceId: string, boardId: string, dto: UpdateTaskBoardDto) {
+  async update(
+    workspaceId: string,
+    boardId: string,
+    dto: UpdateTaskBoardDto,
+    actorId?: string,
+  ) {
+    await this.assertManager(workspaceId, actorId);
     const board = await this.findOne(workspaceId, boardId);
     Object.assign(board, dto);
     await this.boardRepo.save(board);
@@ -106,7 +130,8 @@ export class TaskBoardService {
    * Xóa board
    * - Cascade xóa columns và tasks
    */
-  async remove(workspaceId: string, boardId: string) {
+  async remove(workspaceId: string, boardId: string, actorId?: string) {
+    await this.assertManager(workspaceId, actorId);
     const board = await this.findOne(workspaceId, boardId);
     return this.boardRepo.remove(board);
   }

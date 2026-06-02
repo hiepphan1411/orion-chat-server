@@ -26,6 +26,7 @@ import { EpicModule } from './modules/epic/epic.module';
 import { MilestoneModule } from './modules/milestone/milestone.module';
 
 import { WorkspaceMember } from './modules/workspace-member/entities/workspace-member.entity';
+import { WorkspaceJoinRequest } from './modules/workspace-member/entities/workspace-join-request.entity';
 import { Workspace } from './modules/workspace/entities/workspace.entity';
 import { TaskList } from './modules/task-list/entities/task-list.entity';
 import { TaskBoard } from './modules/task-board/entities/task-board.entity';
@@ -45,6 +46,7 @@ import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
 import { GroupConversation } from './modules/conversation/entities/group-conversation.entity';
+import { ConversationParticipant } from './modules/conversation/entities/conversation-participant.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -54,6 +56,7 @@ import { Document } from './modules/document/entities/document.entity';
 import { DocumentVersion } from './modules/document/entities/document-version.entity';
 import { InlineComment } from './modules/document/entities/inline-comment.entity';
 import { WorkspaceFile } from './modules/workspace-file/entities/workspace-file.entity';
+import { WorkspaceFileVersion } from './modules/workspace-file/entities/workspace-file-version.entity';
 import { Goal } from './modules/goal/entities/goal.entity';
 import { KeyResult } from './modules/goal/entities/key-result.entity';
 import { Sprint } from './modules/sprint/entities/sprint.entity';
@@ -66,7 +69,6 @@ import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
 import { Conversation } from './modules/conversation/entities/conversation.schema';
-import { ConversationParticipant } from './modules/conversation/entities/conversation-participant.entity';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
@@ -79,75 +81,74 @@ import { UserSettingsModule } from './modules/user-settings/user-settings.module
 import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
 import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
 import { UserDevicesModule } from './modules/user-devices/user-devices.module';
+import { GroupsModule } from './modules/groups/groups.module';
+import { StreamVideoModule } from './modules/stream-video/stream-video.module';
+import { OrionAiModule } from './modules/orion-ai/orion-ai.module';
 import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
 import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
 import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
 import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
-import { HealthController } from './health.controller';
 
 @Module({
-  controllers: [HealthController],
   imports: [
     // ENV config
     ConfigModule.forRoot({
       isGlobal: true,
     }),
 
-    TypeOrmModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('DB_HOST', 'localhost'),
-        port: Number(configService.get<string>('DB_PORT', '5432')),
-        username: configService.get<string>('DB_USER', 'postgres'),
-        password: configService.get<string>('DB_PASSWORD', ''),
-        database: configService.get<string>('DB_NAME', 'orion_chat'),
-        entities: [
-          User,
-          Task,
-          TaskAssignee,
-          TaskBoard,
-          TaskList,
-          Workspace,
-          WorkspaceMember,
-          BoardColumn,
-          Label,
-          Report,
-          Admin,
-          Conversation,
-          ConversationParticipant,
-          SubTask,
-          Comment,
-          Attachment,
-          ActivityLog,
-          PersonalNote,
-          NoteCategory,
-          FriendRequest,
-          Friendship,
-          GroupConversation,
-          GroupMember,
-          GroupInvite,
-          CalendarEvent,
-          CalendarEventParticipant,
-          AutomationRule,
-          Document,
-          DocumentVersion,
-          InlineComment,
-          WorkspaceFile,
-          Goal,
-          KeyResult,
-          Sprint,
-          Epic,
-          Milestone,
-          UserSettings,
-          NotificationSettings,
-          PrivacySettings,
-          UserDevices,
-        ],
-        autoLoadEntities: true,
-        synchronize:
-          configService.get<string>('TYPEORM_SYNC', 'false') === 'true',
-      }),
+    TypeOrmModule.forRoot({
+      type: 'postgres',
+      host: 'localhost',
+      port: 5432,
+      username: 'postgres',
+      password: '123456789',
+      database: 'orion_chat',
+      entities: [
+        User,
+        Task,
+        TaskAssignee,
+        TaskBoard,
+        TaskList,
+        Workspace,
+        WorkspaceMember,
+        WorkspaceJoinRequest,
+        BoardColumn,
+        Label,
+        Report,
+        Admin,
+        Conversation,
+        ConversationParticipant,
+        SubTask,
+        Comment,
+        Attachment,
+        ActivityLog,
+        PersonalNote,
+        NoteCategory,
+        FriendRequest,
+        Friendship,
+        GroupConversation,
+        GroupMember,
+        GroupInvite,
+        CalendarEvent,
+        CalendarEventParticipant,
+        AutomationRule,
+        Document,
+        DocumentVersion,
+        InlineComment,
+        WorkspaceFile,
+        WorkspaceFileVersion,
+        Goal,
+        KeyResult,
+        Sprint,
+        Epic,
+        Milestone,
+        UserSettings,
+        NotificationSettings,
+        PrivacySettings,
+        UserDevices,
+      ],
+      autoLoadEntities: true,
+      synchronize: true,
     }),
 
     // MongoDB - Using environment variable
@@ -156,7 +157,6 @@ import { HealthController } from './health.controller';
       useFactory: (configService: ConfigService) => ({
         uri:
           configService.get<string>('MONGO_URI') ||
-          configService.get<string>('MONGO_URL') ||
           'mongodb://localhost:27017/orion_chat',
       }),
     }),
@@ -179,6 +179,7 @@ import { HealthController } from './health.controller';
     TaskBoardModule,
     BoardColumnModule,
     LabelModule,
+    ConversationModule,
     SubTaskModule,
     CommentModule,
     ActivityLogModule,
@@ -186,7 +187,6 @@ import { HealthController } from './health.controller';
     NotesModule,
     FriendRequestModule,
     UsersModule,
-    ConversationModule,
     GroupInviteModule,
     FriendsModule,
     PresenceModule,
@@ -202,6 +202,9 @@ import { HealthController } from './health.controller';
     NotificationSettingsModule,
     PrivacySettingsModule,
     UserDevicesModule,
+    GroupsModule,
+    StreamVideoModule,
+    OrionAiModule,
   ],
 })
 export class AppModule {}

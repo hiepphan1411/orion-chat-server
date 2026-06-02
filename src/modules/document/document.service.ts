@@ -63,6 +63,7 @@ export class DocumentService {
         'versions',
         'versions.editedBy',
         'comments',
+        'comments.parentComment',
         'comments.author',
         'comments.replies',
         'comments.replies.author',
@@ -71,6 +72,17 @@ export class DocumentService {
       ],
     });
     if (!doc) throw new NotFoundException('Document not found');
+
+    doc.viewCount += 1;
+    await this.documentRepo.save(doc);
+
+    doc.versions = (doc.versions ?? []).sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    doc.comments = (doc.comments ?? [])
+      .filter((comment) => !comment.parentComment)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
     return doc;
   }
 
@@ -86,13 +98,14 @@ export class DocumentService {
 
     if (dto.content !== undefined) {
       doc.content = dto.content;
+    }
 
-      if (dto.createdById) {
-        const editor = await this.userRepo.findOne({
-          where: { userId: dto.createdById },
-        });
-        if (editor) doc.lastEditedBy = editor;
-      }
+    const editorId = dto.lastEditedById ?? dto.createdById;
+    if ((dto.title !== undefined || dto.content !== undefined) && editorId) {
+      const editor = await this.userRepo.findOne({
+        where: { userId: editorId },
+      });
+      if (editor) doc.lastEditedBy = editor;
     }
 
     return this.documentRepo.save(doc);

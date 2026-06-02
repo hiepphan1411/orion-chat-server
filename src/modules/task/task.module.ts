@@ -10,6 +10,7 @@ import { Workspace } from '../workspace/entities/workspace.entity';
 import { File } from '../file/entities/file.entity';
 import { TaskService } from './task.service';
 import { TaskController } from './task.controller';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TaskController } from './task.controller';
       Workspace,
       File,
     ]),
+    NotificationModule,
   ],
   controllers: [TaskController],
   providers: [TaskService],

@@ -6,6 +6,7 @@ import { WorkspaceMember } from 'src/modules/workspace-member/entities/workspace
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   ManyToOne,
   OneToMany,
@@ -52,6 +53,9 @@ export class Workspace {
   // bổ sung - ngày cập nhật cuối
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 
   // bổ sung - người sở hữu workspace
   @ManyToOne(() => User, { eager: true })

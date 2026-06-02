@@ -57,7 +57,12 @@ export class NotificationGateway
   }
 
   emitToUser(userId: string, event: string, payload: unknown) {
-    this.server.to(`user:${userId}`).emit(event, payload);
+    const room = `user:${userId}`;
+    const socketsInRoom = onlineUsers.get(userId)?.size ?? 0;
+    this.logger.log(
+      `[emitToUser] event=${event} room=${room} socketsInRoom=${socketsInRoom}`,
+    );
+    this.server.to(room).emit(event, payload);
   }
 
   emitUnreadCount(userId: string) {
@@ -70,6 +75,20 @@ export class NotificationGateway
   @SubscribeMessage('notifications:join')
   handleJoin(@ConnectedSocket() client: Socket, payload: { userId?: string }) {
     if (!payload?.userId) return;
+    for (const [userId, socketIds] of onlineUsers.entries()) {
+      if (userId !== payload.userId && socketIds.has(client.id)) {
+        socketIds.delete(client.id);
+        if (socketIds.size === 0) {
+          onlineUsers.delete(userId);
+        }
+      }
+    }
+
+    if (!onlineUsers.has(payload.userId)) {
+      onlineUsers.set(payload.userId, new Set<string>());
+    }
+
+    onlineUsers.get(payload.userId)?.add(client.id);
     client.join(`user:${payload.userId}`);
   }
 }

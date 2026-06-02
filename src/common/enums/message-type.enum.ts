@@ -7,4 +7,5 @@ export enum MessageType {
   CALL = 'CALL',
   VOICE_MESSAGE = 'VOICE_MESSAGE',
   STICKER = 'STICKER',
+  SYSTEM = 'SYSTEM',
 }

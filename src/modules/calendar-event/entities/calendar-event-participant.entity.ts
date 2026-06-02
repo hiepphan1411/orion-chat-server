@@ -8,6 +8,12 @@ export enum CalendarParticipantType {
   GROUP = 'group',
 }
 
+export enum CalendarParticipantStatus {
+  PENDING = 'pending',
+  ACCEPTED = 'accepted',
+  DECLINED = 'declined',
+}
+
 @Entity()
 export class CalendarEventParticipant {
   @PrimaryGeneratedColumn('uuid')
@@ -33,6 +39,13 @@ export class CalendarEventParticipant {
     onDelete: 'SET NULL',
   })
   group: GroupConversation | null;
+
+  @Column({
+    type: 'enum',
+    enum: CalendarParticipantStatus,
+    default: CalendarParticipantStatus.PENDING,
+  })
+  status: CalendarParticipantStatus;
 
   @Column({ type: 'varchar' })
   displayName: string;

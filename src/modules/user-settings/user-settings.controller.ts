@@ -31,7 +31,10 @@ export class UserSettingsController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   getMySettings(@CurrentUser() user: CurrentUserPayload) {
-    console.log('[UserSettingsController] Getting settings for user:', user.userId);
+    console.log(
+      '[UserSettingsController] Getting settings for user:',
+      user.userId,
+    );
     return this.service.findByUserId(user.userId);
   }
 
@@ -41,7 +44,12 @@ export class UserSettingsController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() updateDto: UpdateUserSettingsDto,
   ) {
-    console.log('[UserSettingsController] Updating settings for user:', user.userId, 'with:', updateDto);
+    console.log(
+      '[UserSettingsController] Updating settings for user:',
+      user.userId,
+      'with:',
+      updateDto,
+    );
     return this.service.update(user.userId, updateDto);
   }
 

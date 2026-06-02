@@ -12,28 +12,9 @@ import { TaskBoardService } from './task-board.service';
 import { CreateTaskBoardDto } from './dto/create-task-board.dto';
 import { UpdateTaskBoardDto } from './dto/update-task-board.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import type { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 
-/**
- * API Task Board
- *
- * POST   /workspaces/:workspaceId/boards             → Tạo board mới
- *   - Body: { boardName, description?, backgroundColor?, icon? }
- *   - Tự động tạo 4 columns mặc định: To Do, In Progress, Review, Done
- *   - Trả về board kèm columns
- *
- * GET    /workspaces/:workspaceId/boards             → Danh sách boards trong workspace
- *   - Trả về mảng board kèm columns
- *   - Sắp xếp theo ngày tạo (mới nhất trước)
- *
- * GET    /workspaces/:workspaceId/boards/:boardId    → Chi tiết board
- *   - Trả về board kèm columns (sắp xếp theo order) và tasks
- *
- * PATCH  /workspaces/:workspaceId/boards/:boardId    → Cập nhật board
- *   - Body: bất kỳ field nào (boardName, description, backgroundColor, icon)
- *
- * DELETE /workspaces/:workspaceId/boards/:boardId    → Xóa board
- *   - Cascade xóa columns, tasks
- */
 @Controller('workspaces/:workspaceId/boards')
 @UseGuards(JwtAuthGuard)
 export class TaskBoardController {
@@ -43,8 +24,9 @@ export class TaskBoardController {
   create(
     @Param('workspaceId') workspaceId: string,
     @Body() dto: CreateTaskBoardDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.boardService.create(workspaceId, dto);
+    return this.boardService.create(workspaceId, dto, user.userId);
   }
 
   @Get()
@@ -65,15 +47,17 @@ export class TaskBoardController {
     @Param('workspaceId') workspaceId: string,
     @Param('boardId') boardId: string,
     @Body() dto: UpdateTaskBoardDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.boardService.update(workspaceId, boardId, dto);
+    return this.boardService.update(workspaceId, boardId, dto, user.userId);
   }
 
   @Delete(':boardId')
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('boardId') boardId: string,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.boardService.remove(workspaceId, boardId);
+    return this.boardService.remove(workspaceId, boardId, user.userId);
   }
 }

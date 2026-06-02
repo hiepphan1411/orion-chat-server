@@ -8,52 +8,79 @@ export type MessageDocument = Message & Document;
 @Schema({ timestamps: true })
 export class Message {
   @Prop()
-  content: string;
+  content!: string;
 
   @Prop()
-  mediaUrl: string;
+  mediaUrl!: string;
 
   @Prop()
-  fileName: string;
+  fileName!: string;
 
   @Prop()
-  fileSize: number;
+  fileSize!: number;
+
+  @Prop()
+  mimeType!: string;
+
+  @Prop()
+  fileExtension!: string;
+
+  @Prop()
+  fileCategory!: string;
+
+  @Prop()
+  fileIcon!: string;
 
   @Prop({ default: false })
-  isPinned: boolean;
+  isPinned!: boolean;
+
+  @Prop({ type: Date, default: null })
+  pinnedAt!: Date | null;
+
+  @Prop({ type: String, default: null })
+  pinnedBy!: string | null;
 
   @Prop({ default: false })
-  isDeleted: boolean;
+  isDeleted!: boolean;
 
   @Prop({ type: [String], default: [] })
-  deletedForUsers: string[];
+  deletedForUsers!: string[];
 
   @Prop({ default: false })
-  isRevoked: boolean;
+  isRevoked!: boolean;
+
+  @Prop({ default: false })
+  deletedByAdmin!: boolean;
 
   @Prop({ default: null })
-  revokedBy?: string;
+  adminDeletedBy!: string;
 
   @Prop({ default: null })
-  revokedAt?: Date;
+  adminDeletedAt!: Date;
 
   @Prop({ default: null })
-  replyToMessageId?: string;
+  revokedBy!: string;
 
   @Prop({ default: null })
-  forwardedFromMessageId?: string;
+  revokedAt!: Date;
+
+  @Prop({ default: null })
+  replyToMessageId!: string;
+
+  @Prop({ default: null })
+  forwardedFromMessageId!: string;
 
   @Prop({ required: true })
   // NOTE: senderBy must ALWAYS be userId (UUID), NEVER phoneNumber
   // This is used to match against User.userId in PostgreSQL
   // Frontend: Use senderBy === currentUser.userId to determine message ownership
-  senderBy: string;
+  senderBy!: string;
 
   @Prop({ required: true })
-  conversationId: string;
+  conversationId!: string;
 
   @Prop()
-  clientMessageId: string;
+  clientMessageId!: string;
 
   @Prop({
     type: [
@@ -64,7 +91,7 @@ export class Message {
     ],
     default: [],
   })
-  seenBy: Array<{ userId: string; seenAt: Date }>;
+  seenBy!: Array<{ userId: string; seenAt: Date }>;
 
   @Prop({
     type: [
@@ -76,14 +103,14 @@ export class Message {
     ],
     default: [],
   })
-  reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
+  reactions!: Array<{ userId: string; emoji: string; reactedAt: Date }>;
 
   @Prop({
     type: String,
     enum: MessageType,
     default: MessageType.TEXT,
   })
-  messageType: MessageType;
+  messageType!: MessageType;
 
   @Prop({
     type: {
@@ -93,34 +120,42 @@ export class Message {
       },
       callStatus: {
         type: String,
-        enum: ['completed', 'missed', 'declined'],
+        enum: ['completed', 'missed', 'declined', 'active'],
       },
       duration: { type: Number },
       isInitiator: { type: Boolean },
       wasRejected: { type: Boolean },
+      callId: { type: String },
     },
     default: null,
   })
-  callData?: {
-    callType?: 'audio' | 'video';
-    callStatus?: 'completed' | 'missed' | 'declined';
-    duration?: number;
-    isInitiator?: boolean;
-    wasRejected?: boolean;
+  callData!: {
+    callType: 'audio' | 'video';
+    callStatus: 'completed' | 'missed' | 'declined' | 'active';
+    duration: number;
+    isInitiator: boolean;
+    wasRejected: boolean;
+    callId?: string;
   } | null;
+
+  @Prop({ type: [String], default: [] })
+  mentions!: string[];
+
+  @Prop({ type: Boolean, default: false })
+  mentionAll!: boolean;
 
   @Prop({
     type: String,
     enum: MessageStatus,
     default: MessageStatus.SENT,
   })
-  messageStatus: MessageStatus;
+  messageStatus!: MessageStatus;
 
   @Prop({ type: Date, default: () => new Date() })
-  createdAt: Date;
+  createdAt!: Date;
 
   @Prop({ type: Date, default: () => new Date() })
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);

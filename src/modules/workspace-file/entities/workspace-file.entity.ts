@@ -4,9 +4,11 @@ import {
   Column,
   CreateDateColumn,
   ManyToOne,
+  OneToMany,
 } from 'typeorm';
 import { Workspace } from '../../workspace/entities/workspace.entity';
 import { User } from '../../users/entities/user.entity';
+import { WorkspaceFileVersion } from './workspace-file-version.entity';
 
 @Entity()
 export class WorkspaceFile {
@@ -28,6 +30,12 @@ export class WorkspaceFile {
   @Column({ nullable: true })
   url: string;
 
+  @Column({ nullable: true })
+  s3Key: string;
+
+  @Column({ type: 'int', default: 1 })
+  currentVersion: number;
+
   @Column({ default: 'workspace' })
   accessLevel: string; // workspace | admin_only | specific_users
 
@@ -45,4 +53,7 @@ export class WorkspaceFile {
 
   @ManyToOne(() => WorkspaceFile, { nullable: true, onDelete: 'CASCADE' })
   parent: WorkspaceFile | null;
+
+  @OneToMany(() => WorkspaceFileVersion, (version) => version.file)
+  versions: WorkspaceFileVersion[];
 }

@@ -13,6 +13,7 @@ import {
 export enum GroupMemberRole {
   OWNER = 'owner',
   ADMIN = 'admin',
+  CO_ADMIN = 'co_admin',
   MEMBER = 'member',
 }
 
@@ -41,6 +42,9 @@ export class GroupMember {
     default: GroupMemberRole.MEMBER,
   })
   role: GroupMemberRole;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  nickname: string | null;
 
   @CreateDateColumn()
   joinedAt: Date;

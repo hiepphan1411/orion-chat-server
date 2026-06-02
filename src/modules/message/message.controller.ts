@@ -5,20 +5,37 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { JwtPayload } from 'jsonwebtoken';
-import { MessageType } from 'src/common/enums/message-type.enum';
 import { S3UploadService } from 'src/common/services/s3-upload.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ChatGateway } from './chat.gateway';
 import { MessageService } from './message.service';
+import { ChatMediaService } from './services/chat-media.service';
+import { ChatMembershipService } from './services/chat-membership.service';
+
+type CreatedMediaMessage = {
+  _id: unknown;
+  senderBy: string;
+  content: string;
+  messageType: string;
+  createdAt: Date;
+  clientMessageId?: string;
+  replyToMessageId?: string;
+  messageStatus?: string;
+};
+
+const MAX_FILES_PER_MESSAGE = 5;
+const MAX_TOTAL_FILES_SIZE = 50 * 1024 * 1024;
 
 @Controller('messages')
 @UseGuards(JwtAuthGuard)
@@ -27,11 +44,15 @@ export class MessageController {
     private readonly messageService: MessageService,
     private readonly s3UploadService: S3UploadService,
     private readonly chatGateway: ChatGateway,
+    private readonly chatMediaService: ChatMediaService,
+    private readonly chatMembershipService: ChatMembershipService,
   ) {}
 
   @Get()
-  findAll() {
-    return this.messageService.findAll();
+  async findAll() {
+    const messages = await this.messageService.findAll();
+    console.log('Message list:', messages);
+    return messages;
   }
 
   @Post()
@@ -47,6 +68,8 @@ export class MessageController {
       mediaUrl?: string;
       fileName?: string;
       fileSize?: number;
+      mentions?: string[];
+      mentionAll?: boolean;
     },
   ) {
     if (!body?.conversationId)
@@ -64,6 +87,8 @@ export class MessageController {
       mediaUrl: body.mediaUrl,
       fileName: body.fileName,
       fileSize: body.fileSize,
+      mentions: body.mentions,
+      mentionAll: body.mentionAll,
     });
   }
 
@@ -91,6 +116,89 @@ export class MessageController {
       messageId: result.messageId,
       revokedBy: result.revokedBy,
       revokedAt: result.revokedAt,
+    });
+
+    return result;
+  }
+
+  @Post(':messageId/recall')
+  async recallMessage(
+    @CurrentUser() user: JwtPayload,
+    @Param('messageId') messageId: string,
+  ) {
+    if (!messageId) {
+      throw new BadRequestException('messageId is required');
+    }
+
+    const handler = this.messageService as {
+      recallMessageWithin24Hours: (payload: {
+        messageId: string;
+        userId: string;
+      }) => Promise<{
+        messageId: string;
+        conversationId: string;
+        revokedBy: string;
+        revokedAt: string;
+        recalled: boolean;
+      }>;
+    };
+
+    const result = await handler.recallMessageWithin24Hours({
+      messageId,
+      userId: String(user.userId),
+    });
+
+    this.chatGateway.emitMessageRecalled({
+      conversationId: result.conversationId,
+      messageId: result.messageId,
+      revokedBy: result.revokedBy,
+      revokedAt: result.revokedAt,
+    });
+
+    return result;
+  }
+
+  @Post(':messageId/admin-delete')
+  async adminDeleteMessage(
+    @CurrentUser() user: JwtPayload,
+    @Param('messageId') messageId: string,
+  ) {
+    if (!messageId) {
+      throw new BadRequestException('messageId is required');
+    }
+
+    const handler = this.messageService as {
+      adminDeleteMessageWithin24Hours: (payload: {
+        messageId: string;
+        userId: string;
+      }) => Promise<{
+        messageId: string;
+        conversationId: string;
+        deletedBy: string;
+        deletedAt: string;
+        deletedByAdmin: boolean;
+      }>;
+    };
+
+    const result = await handler.adminDeleteMessageWithin24Hours({
+      messageId,
+      userId: String(user.userId),
+    });
+
+    const gateway = this.chatGateway as {
+      emitMessageAdminDeleted: (payload: {
+        conversationId: string;
+        messageId: string;
+        deletedBy: string;
+        deletedAt: string;
+      }) => void;
+    };
+
+    gateway.emitMessageAdminDeleted({
+      conversationId: result.conversationId,
+      messageId: result.messageId,
+      deletedBy: result.deletedBy,
+      deletedAt: result.deletedAt,
     });
 
     return result;
@@ -228,9 +336,12 @@ export class MessageController {
     @Body()
     body: {
       conversationId: string;
+      messageType?: string;
     },
   ) {
-    if (!user?.userId) {
+    const userId = String(user?.userId || '');
+
+    if (!userId) {
       throw new BadRequestException('User ID is required');
     }
 
@@ -242,16 +353,93 @@ export class MessageController {
       throw new BadRequestException('conversationId is required');
     }
 
-    const keyPrefix = `chats/${body.conversationId}/${user.userId}`;
+    await this.chatMembershipService.assertConversationMember(
+      userId,
+      body.conversationId,
+    );
+
+    this.chatMediaService.validateUpload(file);
+
+    const keyPrefix = `chats/${body.conversationId}/${userId}`;
 
     const uploaded = await this.s3UploadService.uploadFile(file, keyPrefix);
 
-    return {
+    return this.chatMediaService.buildMediaMetadata({
       mediaUrl: uploaded.url,
       fileName: file.originalname,
       fileSize: file.size,
       mimeType: file.mimetype,
-      messageType: this.detectMessageType(file.mimetype),
+      preferredMessageType: body.messageType,
+    });
+  }
+
+  @Post('upload-batch')
+  @UseInterceptors(
+    FilesInterceptor('files', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024, files: 5 },
+    }),
+  )
+  async uploadForChatBatch(
+    @CurrentUser() user: JwtPayload,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body()
+    body: {
+      conversationId: string;
+      messageType?: string;
+    },
+  ) {
+    const userId = String(user?.userId || '');
+
+    if (!userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!body?.conversationId) {
+      throw new BadRequestException('conversationId is required');
+    }
+
+    await this.chatMembershipService.assertConversationMember(
+      userId,
+      body.conversationId,
+    );
+
+    const safeFiles = files || [];
+    if (safeFiles.length === 0) {
+      throw new BadRequestException('At least one file is required');
+    }
+    if (safeFiles.length > MAX_FILES_PER_MESSAGE) {
+      throw new BadRequestException(
+        `Maximum ${MAX_FILES_PER_MESSAGE} files are allowed per message`,
+      );
+    }
+    let totalFileSize = 0;
+    for (const item of safeFiles) {
+      this.chatMediaService.validateUpload(item);
+      totalFileSize += item.size;
+    }
+    if (totalFileSize > MAX_TOTAL_FILES_SIZE) {
+      throw new BadRequestException('Total upload size exceeds 50MB');
+    }
+
+    const keyPrefix = `chats/${body.conversationId}/${userId}`;
+    const uploadedList = await this.s3UploadService.uploadFilesConcurrently(
+      safeFiles,
+      keyPrefix,
+    );
+
+    return {
+      conversationId: body.conversationId,
+      items: uploadedList.map((uploaded) => {
+        const file = safeFiles[uploaded.index];
+        return this.chatMediaService.buildMediaMetadata({
+          mediaUrl: uploaded.url,
+          fileName: file.originalname,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          preferredMessageType: body.messageType,
+        });
+      }),
     };
   }
 
@@ -271,9 +459,12 @@ export class MessageController {
       clientMessageId?: string;
       replyToMessageId?: string;
       content?: string;
+      messageType?: string;
     },
   ) {
-    if (!user?.userId) {
+    const userId = String(user?.userId || '');
+
+    if (!userId) {
       throw new BadRequestException('User ID is required');
     }
 
@@ -285,26 +476,125 @@ export class MessageController {
       throw new BadRequestException('conversationId is required');
     }
 
-    const keyPrefix = `chats/${body.conversationId}/${user.userId}`;
+    await this.chatMembershipService.assertConversationMember(
+      userId,
+      body.conversationId,
+    );
+
+    this.chatMediaService.validateUpload(file);
+
+    const keyPrefix = `chats/${body.conversationId}/${userId}`;
     const uploaded = await this.s3UploadService.uploadFile(file, keyPrefix);
 
     return this.messageService.sendFileMessage({
       conversationId: body.conversationId,
-      senderBy: user.userId,
+      senderBy: userId,
       mediaUrl: uploaded.url,
       fileName: file.originalname,
       fileSize: file.size,
       mimeType: file.mimetype,
+      preferredMessageType: body.messageType,
       clientMessageId: body.clientMessageId,
       replyToMessageId: body.replyToMessageId,
       content: body.content,
     });
   }
 
-  private detectMessageType(mimeType: string): MessageType {
-    if (mimeType.startsWith('image/')) return MessageType.IMAGE;
-    if (mimeType.startsWith('video/')) return MessageType.VIDEO;
-    if (mimeType.startsWith('audio/')) return MessageType.AUDIO;
-    return MessageType.FILE;
+  @Post('send-files')
+  @UseInterceptors(
+    FilesInterceptor('files', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024, files: 5 },
+    }),
+  )
+  async sendFiles(
+    @CurrentUser() user: JwtPayload,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body()
+    body: {
+      conversationId?: string;
+      messageType?: string;
+      content?: string;
+      replyToMessageId?: string;
+      clientMessageIdPrefix?: string;
+    },
+  ) {
+    const userId = String(user?.userId || '');
+
+    if (!userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!body?.conversationId) {
+      throw new BadRequestException('conversationId is required');
+    }
+
+    await this.chatMembershipService.assertConversationMember(
+      userId,
+      body.conversationId,
+    );
+
+    const safeFiles = files || [];
+    if (safeFiles.length === 0) {
+      throw new BadRequestException('At least one file is required');
+    }
+    if (safeFiles.length > MAX_FILES_PER_MESSAGE) {
+      throw new BadRequestException(
+        `Maximum ${MAX_FILES_PER_MESSAGE} files are allowed per message`,
+      );
+    }
+    let totalFileSize = 0;
+    for (const item of safeFiles) {
+      this.chatMediaService.validateUpload(item);
+      totalFileSize += item.size;
+    }
+    if (totalFileSize > MAX_TOTAL_FILES_SIZE) {
+      throw new BadRequestException('Total upload size exceeds 50MB');
+    }
+
+    const keyPrefix = `chats/${body.conversationId}/${userId}`;
+    const uploadedList = await this.s3UploadService.uploadFilesConcurrently(
+      safeFiles,
+      keyPrefix,
+    );
+
+    const created = (await Promise.all(
+      uploadedList.map((uploaded) => {
+        const file = safeFiles[uploaded.index];
+        const idPrefix = body.clientMessageIdPrefix || 'batch';
+        return this.messageService.sendFileMessage({
+          conversationId: body.conversationId as string,
+          senderBy: userId,
+          mediaUrl: uploaded.url,
+          fileName: file.originalname,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          preferredMessageType: body.messageType,
+          content: body.content,
+          replyToMessageId: body.replyToMessageId,
+          clientMessageId: `${idPrefix}-${Date.now()}-${uploaded.index}`,
+        });
+      }),
+    )) as CreatedMediaMessage[];
+
+    for (const message of created) {
+      this.chatGateway.emitNewMessage({
+        conversationId: body.conversationId,
+        messageId: String(message._id),
+        senderBy: message.senderBy,
+        content: message.content,
+        messageType: message.messageType,
+        createdAt: message.createdAt,
+        clientMessageId: message.clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+        messageStatus: message.messageStatus,
+      });
+    }
+
+    return {
+      conversationId: body.conversationId,
+      count: created.length,
+      items: created,
+    };
   }
 }

@@ -12,7 +12,10 @@ import {
   FriendshipStatus,
 } from '../friendship/entities/friendship.entity';
 import { GroupConversation } from '../conversation/entities/group-conversation.entity';
-import { GroupMember } from '../group-member/entities/group-member.entity';
+import {
+  GroupMember,
+  GroupMemberRole,
+} from '../group-member/entities/group-member.entity';
 import { User } from '../users/entities/user.entity';
 import {
   CalendarEvent,
@@ -22,6 +25,7 @@ import {
 import {
   CalendarEventParticipant,
   CalendarParticipantType,
+  CalendarParticipantStatus,
 } from './entities/calendar-event-participant.entity';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import { CreateCalendarEventDto } from './dto/create-calendar-event.dto';
@@ -32,6 +36,9 @@ import {
 } from './dto/query-calendar-event.dto';
 import { UpdateCalendarEventDto } from './dto/update-calendar-event.dto';
 import { NotificationService } from '../notifications/notification.service';
+import { MessageService } from '../message/message.service';
+import { ChatGateway } from '../message/chat.gateway';
+import { MessageType } from 'src/common/enums/message-type.enum';
 
 @Injectable()
 export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
@@ -51,6 +58,8 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(GroupConversation)
     private readonly groupConversationRepo: Repository<GroupConversation>,
     private readonly notificationService: NotificationService,
+    private readonly messageService: MessageService,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   onModuleInit() {
@@ -81,13 +90,20 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
         new Brackets((whereQb) => {
           whereQb
             .where('owner.userId = :userId', { userId })
-            .orWhere('participantUser.userId = :userId', { userId });
+            .orWhere(
+              'participantUser.userId = :userId AND participant.status = :accepted',
+              {
+                userId,
+                accepted: CalendarParticipantStatus.ACCEPTED,
+              },
+            );
 
           if (joinedGroupIds.length) {
             whereQb.orWhere(
-              'participantGroup.conversationId IN (:...groupIds)',
+              'participantGroup.conversationId IN (:...groupIds) AND participant.status = :accepted',
               {
                 groupIds: joinedGroupIds,
+                accepted: CalendarParticipantStatus.ACCEPTED,
               },
             );
           }
@@ -137,6 +153,7 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
     });
 
     const groups = groupRows
+      .filter((row) => this.isGroupAdminRole(row.role))
       .map((row) => row.group)
       .filter((group) =>
         keyword ? group.groupName.toLowerCase().includes(keyword) : true,
@@ -171,6 +188,7 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
     const participants = await this.resolveParticipants(
       userId,
       dto.participants,
+      [],
     );
 
     const event = this.calendarEventRepo.create({
@@ -191,6 +209,7 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
 
     const saved = await this.calendarEventRepo.save(event);
     await this.notifyEventInvitees(saved, new Set<string>());
+    await this.sendGroupEventMessages(saved, new Set<string>());
     return this.toResponse(saved);
   }
 
@@ -213,7 +232,8 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('You can only edit your own calendar event');
     }
 
-    const previousInvitees = await this.resolveParticipantRecipientIds(event);
+    const previousInvitees = await this.resolvePendingInviteRecipientIds(event);
+    const previousGroupIds = this.getGroupParticipantIds(event);
 
     const nextStart = dto.startTime ? new Date(dto.startTime) : event.startTime;
     const nextEnd = dto.endTime ? new Date(dto.endTime) : event.endTime;
@@ -236,11 +256,13 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
       event.participants = await this.resolveParticipants(
         userId,
         dto.participants,
+        event.participants,
       );
     }
 
     const saved = await this.calendarEventRepo.save(event);
     await this.notifyEventInvitees(saved, new Set(previousInvitees));
+    await this.sendGroupEventMessages(saved, new Set(previousGroupIds));
     return this.toResponse(saved);
   }
 
@@ -319,6 +341,7 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
   private async resolveParticipants(
     ownerUserId: string,
     participants?: CalendarParticipantDto[],
+    existingParticipants: CalendarEventParticipant[] = [],
   ): Promise<CalendarEventParticipant[]> {
     if (!participants || !participants.length) return [];
 
@@ -394,17 +417,32 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
         relations: ['group', 'user'],
       });
 
-      const validGroupIds = new Set(
-        groupMemberships.map((item) => item.group.conversationId),
+      const membershipByGroup = new Map(
+        groupMemberships.map((item) => [item.group.conversationId, item]),
       );
+
       for (const groupId of groupIds) {
-        if (!validGroupIds.has(groupId)) {
+        const membership = membershipByGroup.get(groupId);
+        if (!membership) {
           throw new BadRequestException(
             `Group ${groupId} is not in your memberships`,
           );
         }
+
+        if (!this.isGroupAdminRole(membership.role)) {
+          throw new ForbiddenException(
+            `Group ${groupId} requires owner/admin permissions to add events`,
+          );
+        }
       }
     }
+
+    const existingMap = new Map(
+      existingParticipants.map((participant) => [
+        this.getParticipantKey(participant),
+        participant,
+      ]),
+    );
 
     return participants.map((item) => {
       if (item.type === CalendarParticipantType.FRIEND) {
@@ -413,12 +451,21 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException('Friend participant not found');
         }
 
+        const key = this.getParticipantKey(item);
+        const existing = existingMap.get(key);
+        const status = existing
+          ? existing.status === CalendarParticipantStatus.DECLINED
+            ? CalendarParticipantStatus.PENDING
+            : existing.status
+          : CalendarParticipantStatus.PENDING;
+
         return this.calendarParticipantRepo.create({
           type: CalendarParticipantType.FRIEND,
           user,
           group: null,
           displayName: item.displayName || user.fullName,
           avatarUrl: item.avatarUrl ?? user.avatarUrl ?? null,
+          status,
         });
       }
 
@@ -433,6 +480,7 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
         group,
         displayName: item.displayName || group.groupName,
         avatarUrl: item.avatarUrl ?? group.groupAvatar ?? null,
+        status: CalendarParticipantStatus.ACCEPTED,
       });
     });
   }
@@ -458,7 +506,15 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
         groupId: participant.group?.conversationId,
         name: participant.displayName,
         avatar: participant.avatarUrl,
+        status: participant.status,
       })),
+      owner: event.owner
+        ? {
+            userId: event.owner.userId,
+            fullName: event.owner.fullName,
+            avatarUrl: event.owner.avatarUrl,
+          }
+        : null,
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
     };
@@ -486,7 +542,8 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
     for (const participant of event.participants || []) {
       if (
         participant.type === CalendarParticipantType.FRIEND &&
-        participant.user?.userId
+        participant.user?.userId &&
+        participant.status === CalendarParticipantStatus.ACCEPTED
       ) {
         recipientIds.add(participant.user.userId);
       }
@@ -520,11 +577,28 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
     return Array.from(recipientIds);
   }
 
+  private async resolvePendingInviteRecipientIds(event: CalendarEvent) {
+    const recipientIds = new Set<string>();
+
+    for (const participant of event.participants || []) {
+      if (
+        participant.type === CalendarParticipantType.FRIEND &&
+        participant.user?.userId &&
+        participant.status === CalendarParticipantStatus.PENDING
+      ) {
+        recipientIds.add(participant.user.userId);
+      }
+    }
+
+    recipientIds.delete(event.owner?.userId);
+    return Array.from(recipientIds);
+  }
+
   private async notifyEventInvitees(
     event: CalendarEvent,
     existingRecipientIds: Set<string>,
   ) {
-    const recipientIds = await this.resolveParticipantRecipientIds(event);
+    const recipientIds = await this.resolvePendingInviteRecipientIds(event);
     const newRecipients = recipientIds.filter(
       (id) => !existingRecipientIds.has(id),
     );
@@ -542,6 +616,85 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
           invitedBy: event.owner.userId,
         },
       });
+    }
+  }
+
+  private getGroupParticipantIds(event: CalendarEvent) {
+    return Array.from(
+      new Set(
+        (event.participants || [])
+          .filter(
+            (participant) => participant.type === CalendarParticipantType.GROUP,
+          )
+          .map((participant) => participant.group?.conversationId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+  }
+
+  private isGroupAdminRole(role: GroupMemberRole) {
+    return (
+      role === GroupMemberRole.OWNER ||
+      role === GroupMemberRole.ADMIN ||
+      role === GroupMemberRole.CO_ADMIN
+    );
+  }
+
+  private getParticipantKey(
+    participant: CalendarParticipantDto | CalendarEventParticipant,
+  ) {
+    if (participant.type === CalendarParticipantType.FRIEND) {
+      const userId =
+        participant instanceof CalendarEventParticipant
+          ? participant.user?.userId
+          : participant.userId;
+      return `friend:${userId ?? ''}`;
+    }
+
+    const groupId =
+      participant instanceof CalendarEventParticipant
+        ? participant.group?.conversationId
+        : participant.groupId;
+    return `group:${groupId ?? ''}`;
+  }
+
+  private async sendGroupEventMessages(
+    event: CalendarEvent,
+    previousGroupIds: Set<string>,
+  ) {
+    const groupIds = this.getGroupParticipantIds(event).filter(
+      (id) => !previousGroupIds.has(id),
+    );
+
+    if (!groupIds.length || !event.owner) return;
+
+    const messageContent = `${event.owner.fullName} has scheduled an event "${event.title}" for this group.`;
+
+    for (const groupId of groupIds) {
+      try {
+        const message = await this.messageService.createMessage({
+          conversationId: groupId,
+          senderBy: event.owner.userId,
+          content: messageContent,
+          messageType: MessageType.SYSTEM,
+        });
+
+        this.chatGateway.emitNewMessage({
+          conversationId: groupId,
+          messageId: String(message._id),
+          senderBy: event.owner.userId,
+          senderName: event.owner.fullName,
+          senderAvatar: event.owner.avatarUrl || undefined,
+          content: message.content ?? messageContent,
+          messageType: message.messageType,
+          createdAt: message.createdAt,
+          clientMessageId: message.clientMessageId,
+          messageStatus: message.messageStatus,
+        });
+      } catch (error) {
+        // Swallow errors to avoid blocking event creation.
+        continue;
+      }
     }
   }
 
@@ -598,5 +751,64 @@ export class CalendarEventService implements OnModuleInit, OnModuleDestroy {
       event.reminderSentAt = new Date();
       await this.calendarEventRepo.save(event);
     }
+  }
+
+  async findPendingInvites(userId: string) {
+    const participants = await this.calendarParticipantRepo.find({
+      where: {
+        user: { userId },
+        type: CalendarParticipantType.FRIEND,
+        status: CalendarParticipantStatus.PENDING,
+      },
+      relations: [
+        'event',
+        'event.owner',
+        'event.participants',
+        'event.participants.user',
+        'event.participants.group',
+      ],
+      order: { participantId: 'DESC' },
+    });
+
+    const events = new Map<string, CalendarEvent>();
+    for (const participant of participants) {
+      if (participant.event?.eventId) {
+        events.set(participant.event.eventId, participant.event);
+      }
+    }
+
+    return Array.from(events.values()).map((event) => this.toResponse(event));
+  }
+
+  async respondToInvite(
+    userId: string,
+    eventId: string,
+    status:
+      | CalendarParticipantStatus.ACCEPTED
+      | CalendarParticipantStatus.DECLINED,
+  ) {
+    const participant = await this.calendarParticipantRepo.findOne({
+      where: {
+        event: { eventId },
+        user: { userId },
+        type: CalendarParticipantType.FRIEND,
+      },
+      relations: [
+        'event',
+        'event.owner',
+        'event.participants',
+        'event.participants.user',
+        'event.participants.group',
+      ],
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Event invite not found');
+    }
+
+    participant.status = status;
+    await this.calendarParticipantRepo.save(participant);
+
+    return this.toResponse(participant.event);
   }
 }

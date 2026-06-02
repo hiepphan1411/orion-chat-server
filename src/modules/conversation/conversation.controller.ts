@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Controller,
   Get,
@@ -24,6 +25,20 @@ import {
   HideConversationDTO,
   RevealConversationDTO,
 } from './dto/hide-conversation.dto';
+import { CreateConversationDto } from './dto/create-conversation.dto';
+import { GroupsService } from '../groups/groups.service';
+
+type LeaveGroupResult = {
+  groupId: string;
+  leftUserId: string;
+  leftAt: string;
+  groupDeleted: boolean;
+  transferredAdmin?: {
+    oldAdminUserId: string;
+    newAdminUserId: string;
+    transferredAt: string;
+  };
+};
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -32,6 +47,7 @@ export class ConversationController {
     private readonly conversationService: ConversationService,
     private readonly messageService: MessageService,
     private readonly chatGateway: ChatGateway,
+    private readonly groupsService: GroupsService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -57,6 +73,65 @@ export class ConversationController {
     return this.conversationService.findAllByUserId(user.userId);
   }
 
+  @Post()
+  async createConversation(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: CreateConversationDto,
+  ) {
+    const currentUserId = String(user?.userId || '');
+
+    if (!currentUserId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!body?.type) {
+      throw new BadRequestException('type is required');
+    }
+
+    if (body.type === 'PRIVATE') {
+      if (!body.recipientId) {
+        throw new BadRequestException('recipientId is required for PRIVATE');
+      }
+
+      return this.conversationService.getOrCreatePrivateConversation(
+        currentUserId,
+        body.recipientId,
+      );
+    }
+
+    const groupHandler = this.conversationService as {
+      createGroupConversation: (payload: {
+        creatorId: string;
+        groupName: string;
+        memberIds?: string[];
+        memberNicknames?: Array<{ userId: string; nickname?: string }>;
+      }) => Promise<unknown>;
+    };
+
+    const conversation = await groupHandler.createGroupConversation({
+      creatorId: currentUserId,
+      groupName: String(body.groupName || ''),
+      memberIds: body.memberIds,
+      memberNicknames: body.memberNicknames,
+    });
+
+    // Emit group created event to all members
+    if (conversation && typeof conversation === 'object') {
+      const conv = conversation as any;
+      if (conv.conversationId && conv.participants) {
+        const memberIds = conv.participants.map((p: any) => p.userId);
+        this.chatGateway.emitGroupCreated({
+          groupId: conv.conversationId,
+          groupName: conv.groupInfo?.groupName || '',
+          createdBy: currentUserId,
+          memberIds,
+        });
+      }
+    }
+
+    return conversation;
+  }
+
   /**
    * Lấy HOẶC TẠO mới PRIVATE conversation (1:1 chat) với một bạn bè
    *
@@ -66,7 +141,7 @@ export class ConversationController {
    *
    * Response fields:
    * - conversationId
-   * - type: "PRIVATE" TODO: luôn là private conversation
+   * - type: "PRIVATE"
    * - participants: 2 users với full info (userId, fullName, avatarUrl, etc)
    * - lastMessage: Tin nhắn cuối (nếu có)
    * - blockStatus: Thông tin block (quan trọng cho security)
@@ -166,6 +241,25 @@ export class ConversationController {
     }
   }
 
+  @Get(':conversationId/media')
+  async getConversationMedia(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.getConversationMedia({
+      conversationId,
+      userId: user.userId,
+      cursor,
+      limit: limit ? Number(limit) : 30,
+    });
+  }
+
   /**
    * Gửi TIN NHẮN mới trong conversation (REST API fallback)
    *
@@ -235,6 +329,64 @@ export class ConversationController {
     });
 
     return message;
+  }
+
+  /**
+   * Pin một tin nhắn quan trọng trong conversation
+   * @route POST /conversations/:conversationId/messages/:messageId/pin
+   */
+  @Post(':conversationId/messages/:messageId/pin')
+  async pinMessage(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.pinMessage({
+      conversationId,
+      messageId,
+      userId: user.userId,
+    });
+  }
+
+  /**
+   * Gỡ pin tin nhắn trong conversation
+   * @route DELETE /conversations/:conversationId/messages/:messageId/pin
+   */
+  @Delete(':conversationId/messages/:messageId/pin')
+  async unpinMessage(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.unpinMessage({
+      conversationId,
+      messageId,
+      userId: user.userId,
+    });
+  }
+
+  /**
+   * Lấy danh sách tin nhắn đang được pin
+   * @route GET /conversations/:conversationId/pinned-messages
+   */
+  @Get(':conversationId/pinned-messages')
+  async getPinnedMessages(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    return this.messageService.getPinnedMessages(conversationId, user.userId);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -481,6 +633,56 @@ export class ConversationController {
     );
   }
 
+  @Patch(':conversationId/hidden')
+  updateHiddenConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { hidden?: boolean },
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (typeof body?.hidden !== 'boolean') {
+      throw new BadRequestException('hidden must be boolean');
+    }
+
+    const handler = this.conversationService as {
+      setConversationHidden: (
+        conversationId: string,
+        userId: string,
+        hidden: boolean,
+      ) => Promise<unknown>;
+    };
+
+    const userId = String(user.userId);
+
+    const resultPromise = handler.setConversationHidden(
+      conversationId,
+      userId,
+      body.hidden,
+    );
+
+    return resultPromise.then((result) => {
+      const updatedAt =
+        typeof result === 'object' && result && 'updatedAt' in result
+          ? String(
+              (result as { updatedAt?: string }).updatedAt ||
+                new Date().toISOString(),
+            )
+          : new Date().toISOString();
+
+      this.chatGateway.emitConversationHiddenUpdated({
+        conversationId,
+        userId,
+        hidden: body.hidden as boolean,
+        updatedAt,
+      });
+
+      return result;
+    });
+  }
+
   /**
    * MỞ KHÓA conversation (tiết lộ sau khi ẩn)
    *
@@ -521,10 +723,22 @@ export class ConversationController {
       throw new BadRequestException('User ID is required');
     }
 
-    return this.conversationService.clearChatHistory(
+    const result = await this.conversationService.clearChatHistory(
       conversationId,
       user.userId,
     );
+
+    this.chatGateway.emitConversationHistoryCleared({
+      conversationId,
+      userId: String(user.userId),
+      deletedMessagesCount:
+        typeof result?.deletedMessagesCount === 'number'
+          ? result.deletedMessagesCount
+          : 0,
+      clearedAt: new Date().toISOString(),
+    });
+
+    return result;
   }
 
   /**
@@ -667,5 +881,74 @@ export class ConversationController {
       conversationId,
       user.userId,
     );
+  }
+
+  /**
+   * Xóa cuộc hội thoại cho người dùng hiện tại (chỉ áp dụng PRIVATE).
+   * @route DELETE /conversations/:conversationId
+   */
+  @Delete(':conversationId')
+  async deleteConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    const result = await this.conversationService.deleteConversationForUser(
+      conversationId,
+      user.userId,
+    );
+
+    this.chatGateway.emitConversationDeleted({
+      conversationId,
+      userId: String(user.userId),
+      deletedAt: new Date().toISOString(),
+    });
+
+    return result;
+  }
+
+  /**
+   * Leave a group conversation from the conversation namespace.
+   * This endpoint exists for FE compatibility with /conversations/:id/leave.
+   */
+  @Post(':conversationId/leave')
+  async leaveConversation(
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body()
+    body?: {
+      newAdminUserId?: string;
+    },
+  ) {
+    if (!user?.userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    const result = (await this.groupsService.leaveGroup(
+      conversationId,
+      user.userId,
+      body?.newAdminUserId,
+    )) as LeaveGroupResult;
+
+    if (result.transferredAdmin) {
+      this.chatGateway.emitGroupAdminTransferred({
+        groupId: conversationId,
+        oldAdminUserId: result.transferredAdmin.oldAdminUserId,
+        newAdminUserId: result.transferredAdmin.newAdminUserId,
+        transferredAt: result.transferredAdmin.transferredAt,
+      });
+    }
+
+    this.chatGateway.emitGroupMemberLeft({
+      groupId: conversationId,
+      userId: user.userId,
+      leftAt: result.leftAt,
+      groupDeleted: result.groupDeleted,
+    });
+
+    return result;
   }
 }
