@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable */
 import {
   Controller,
   Get,
@@ -39,6 +38,15 @@ type LeaveGroupResult = {
     transferredAt: string;
   };
 };
+
+const isExpectedConversationNotFound = (error: unknown) =>
+  error instanceof NotFoundException ||
+  (typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    String((error as { message?: unknown }).message)
+      .toLowerCase()
+      .includes('conversation not found'));
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -194,8 +202,10 @@ export class ConversationController {
         user.userId,
       );
     } catch (error) {
-      console.error('=== ERROR getConversationDetail ===');
-      console.error(error);
+      if (!isExpectedConversationNotFound(error)) {
+        console.error('=== ERROR getConversationDetail ===');
+        console.error(error);
+      }
       throw error; // giữ nguyên để NestJS xử lý
     }
   }
@@ -235,8 +245,10 @@ export class ConversationController {
         limit ? Number(limit) : 30,
       );
     } catch (error) {
-      console.error('=== ERROR getMessagesByConversation ===');
-      console.error(error);
+      if (!isExpectedConversationNotFound(error)) {
+        console.error('=== ERROR getMessagesByConversation ===');
+        console.error(error);
+      }
       throw error;
     }
   }
