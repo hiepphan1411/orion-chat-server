@@ -326,6 +326,8 @@ jobs:
 
             echo "[INFO] Effective database hosts from .env.production:"
             grep -E '^(DB_HOST|DB_PORT|DB_NAME|DB_USER|REDIS_URL)=' .env.production || true
+            echo "[INFO] Effective public/socket/OnlyOffice URLs from .env.production:"
+            grep -E '^(APP_BASE_URL|WEB_BASE_URL|ALLOWED_ORIGINS|SOCKET_ALLOWED_ORIGINS|ONLYOFFICE_DOCUMENT_SERVER_URL|ONLYOFFICE_CALLBACK_BASE_URL)=' .env.production || true
             grep -E '^MONGO_URI=.*@mongodb(:|/)' .env.production >/dev/null \
               && echo "MONGO_URI=local mongodb container" \
               || echo "MONGO_URI=not local mongodb container"
@@ -360,6 +362,7 @@ jobs:
                 if [ ! -e /etc/nginx/sites-enabled/orion-backend ]; then
                   sudo ln -s /etc/nginx/sites-available/orion-backend /etc/nginx/sites-enabled/orion-backend
                 fi
+                sudo rm -f /etc/nginx/sites-enabled/default
                 sudo nginx -t
                 sudo systemctl reload nginx
               else
