@@ -79,7 +79,7 @@ export class WorkspaceService {
         'workspace.boards',
       ],
     });
-    return memberships.map((m) => m.workspace);
+    return memberships.map((m) => m.workspace).filter((ws) => ws != null);
   }
 
   /**
@@ -123,7 +123,7 @@ export class WorkspaceService {
       }
     }
     const workspace = await this.findOne(id);
-    return this.workspaceRepo.remove(workspace);
+    return this.workspaceRepo.softRemove(workspace);
   }
 
   async transferOwner(workspaceId: string, targetUserId: string, actorId: string) {
