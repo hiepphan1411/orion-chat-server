@@ -107,6 +107,8 @@ export class MessageService {
     mediaUrl?: string;
     fileName?: string;
     fileSize?: number;
+    mentions?: string[];
+    mentionAll?: boolean;
   }) {
     await this.chatMembershipService.assertConversationNotBlockedForMessaging(
       payload.senderBy,
@@ -131,6 +133,10 @@ export class MessageService {
       replyToMessageId: payload.replyToMessageId,
       clientMessageId: payload.clientMessageId,
       messageStatus: 'SENT',
+      mentions: (payload.mentions || []).filter(
+        (id) => id !== payload.senderBy,
+      ),
+      mentionAll: payload.mentionAll || false,
     });
   }
 

@@ -464,6 +464,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       isInitiator?: boolean;
       wasRejected?: boolean;
     } | null;
+    mentions?: string[];
+    mentionAll?: boolean;
   }) {
     this.server
       .to(`conversation:${payload.conversationId}`)
@@ -487,6 +489,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           replyToMessagePreview: payload.replyToMessagePreview,
           messageStatus: payload.messageStatus,
           callData: payload.callData || null,
+          mentions: payload.mentions || [],
+          mentionAll: payload.mentionAll || false,
         },
       });
   }
@@ -694,6 +698,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
       }
 
+      // Gửi notification cho tất cả thành viên còn lại trong conversation
+      // để hỗ trợ cả PRIVATE và GROUP chat.
+      const participants = await this.participantRepo.find({
+        where: { conversationId: data.conversationId },
+      });
+
+      const receiverIds = participants
+        .map((item) => item.userId)
+        .filter((userId) => userId && userId !== senderId);
+
+      // Parse mentions
+      const explicitMentions = Array.isArray(data.mentions) ? data.mentions : [];
+      const explicitMentionAll = typeof data.mentionAll === 'boolean' ? data.mentionAll : false;
+
+      const { mentions: parsedMentions, mentionAll: parsedMentionAll } = this.parseMentions(
+        data.content,
+        receiverIds,
+      );
+
+      const finalMentions = Array.from(
+        new Set([...explicitMentions, ...parsedMentions]),
+      ).filter((id) => id !== senderId);
+      const finalMentionAll = explicitMentionAll || parsedMentionAll;
+
       // Create message in database
       const message = await this.messageModel.create({
         conversationId: data.conversationId,
@@ -708,6 +736,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         clientMessageId: data.clientMessageId,
         messageStatus: 'SENT',
         callData: data.callData || null,
+        mentions: finalMentions,
+        mentionAll: finalMentionAll,
       });
 
       this.logger.log(`[ChatGateway] Message created: ${String(message._id)}`);
@@ -729,7 +759,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Use senderId as fallback senderName
       }
 
-      // FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType vào emitNewMessage
+      // FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType, mentions, mentionAll vào emitNewMessage
       // để bên B nhận được socket event với đủ thông tin preview media ngay lập tức
       this.emitNewMessage({
         conversationId: data.conversationId,
@@ -749,17 +779,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         replyToMessagePreview,
         messageStatus: 'SENT',
         callData: data.callData || null,
+        mentions: finalMentions,
+        mentionAll: finalMentionAll,
       });
-
-      // Gửi notification cho tất cả thành viên còn lại trong conversation
-      // để hỗ trợ cả PRIVATE và GROUP chat.
-      const participants = await this.participantRepo.find({
-        where: { conversationId: data.conversationId },
-      });
-
-      const receiverIds = participants
-        .map((item) => item.userId)
-        .filter((userId) => userId && userId !== senderId);
 
       if (receiverIds.length > 0) {
         const conversation = await this.conversationRepo.findOne({
@@ -783,8 +805,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               : `Da gui ${data.type}`;
 
         await Promise.allSettled(
-          receiverIds.map((receiverId) =>
-            this.notificationService.createAndEmit({
+          receiverIds.map((receiverId) => {
+            const isTagged = finalMentionAll || finalMentions.includes(receiverId);
+
+            return this.notificationService.createAndEmit({
               userId: receiverId,
               type: data.type === 'call' ? 'call' : 'message',
               title: senderName || '',
@@ -798,9 +822,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 messageType: data.type,
                 conversationType,
                 groupName: groupInfo?.groupName,
+                isTagged, // Sets the tag override flag so notification service handles mute bypass properly
               },
-            }),
-          ),
+            });
+          }),
         );
       }
 
@@ -928,6 +953,52 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         true,
       );
     }
+  }
+
+  private parseMentions(
+    content: string,
+    allMembers: string[],
+  ): { mentions: string[]; mentionAll: boolean } {
+    const mentions: string[] = [];
+    let mentionAll = false;
+
+    if (!content) return { mentions, mentionAll };
+
+    // 1. Detect "@all" keywords with robust non-ASCII word boundary checking
+    const allKeywords = ['@all', '@everyone', '@tất cả', '@tất_cả'];
+    const lowerContent = content.toLowerCase();
+    mentionAll = allKeywords.some((kw) => {
+      const index = lowerContent.indexOf(kw);
+      if (index === -1) return false;
+
+      // Check preceding character boundary
+      if (index > 0) {
+        const charBefore = lowerContent[index - 1];
+        if (/\w/.test(charBefore)) return false;
+      }
+
+      // Check following character boundary
+      const afterIndex = index + kw.length;
+      if (afterIndex < lowerContent.length) {
+        const charAfter = lowerContent[afterIndex];
+        if (/[\w\d]/.test(charAfter)) return false;
+      }
+
+      return true;
+    });
+
+    // 2. Detect UUID mentions (e.g. @550e8400-e29b-41d4-a716-446655440000)
+    const uuidRegex =
+      /\B@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi;
+    let match;
+    while ((match = uuidRegex.exec(content)) !== null) {
+      const userId = match[1].toLowerCase();
+      if (allMembers.includes(userId) && !mentions.includes(userId)) {
+        mentions.push(userId);
+      }
+    }
+
+    return { mentions, mentionAll };
   }
 
   private extractUserId(client: Socket): string | null {

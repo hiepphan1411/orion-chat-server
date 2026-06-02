@@ -68,6 +68,8 @@ export class MessageController {
       mediaUrl?: string;
       fileName?: string;
       fileSize?: number;
+      mentions?: string[];
+      mentionAll?: boolean;
     },
   ) {
     if (!body?.conversationId)
@@ -85,6 +87,8 @@ export class MessageController {
       mediaUrl: body.mediaUrl,
       fileName: body.fileName,
       fileSize: body.fileSize,
+      mentions: body.mentions,
+      mentionAll: body.mentionAll,
     });
   }
 

@@ -65,6 +65,14 @@ export class SendMessageSocketDto {
   replyToMessageId?: string;
 
   @IsOptional()
+  @IsUUID(undefined, { each: true })
+  mentions?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  mentionAll?: boolean;
+
+  @IsOptional()
   callData?: {
     callType?: 'audio' | 'video';
     callStatus?: 'completed' | 'missed' | 'declined';

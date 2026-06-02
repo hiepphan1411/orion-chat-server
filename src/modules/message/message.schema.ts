@@ -138,6 +138,12 @@ export class Message {
     callId?: string;
   } | null;
 
+  @Prop({ type: [String], default: [] })
+  mentions!: string[];
+
+  @Prop({ type: Boolean, default: false })
+  mentionAll!: boolean;
+
   @Prop({
     type: String,
     enum: MessageStatus,
