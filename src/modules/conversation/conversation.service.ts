@@ -621,7 +621,7 @@ export class ConversationService {
     conversationId: string,
     userId: string,
     cursor?: string,
-    limit = 30,
+    limit = 50,
   ): Promise<ConversationMessagesResult> {
     const membership = await this.requireMembership(conversationId, userId);
 
@@ -796,7 +796,7 @@ export class ConversationService {
 
     return {
       conversationId,
-      items: mappedItems,
+      items: mappedItems.reverse(),
       nextCursor,
     };
   }
@@ -1030,11 +1030,29 @@ export class ConversationService {
   private async fetchConversationMessages(
     conversationId: string,
     cursor?: string,
-    limit = 30,
+    limit = 50,
     userId?: string,
   ): Promise<MessageDetail[]> {
     const pageSize = Math.min(Math.max(limit, 1), 100);
-    const cursorDate = cursor ? new Date(cursor) : null;
+    
+    let cursorDate: Date | null = null;
+    if (cursor) {
+      if (/^[0-9a-fA-F]{24}$/.test(cursor)) {
+        const msg = await this.messageModel
+          .findById(cursor)
+          .select('createdAt')
+          .lean<{ createdAt?: Date }>()
+          .exec();
+        if (msg?.createdAt) {
+          cursorDate = new Date(msg.createdAt);
+        }
+      } else {
+        const parsedDate = new Date(cursor);
+        if (!Number.isNaN(parsedDate.getTime())) {
+          cursorDate = parsedDate;
+        }
+      }
+    }
 
     const flatFilter: {
       conversationId: string;
