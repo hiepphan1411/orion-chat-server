@@ -10,11 +10,31 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
 const onlineUsers = new Map<string, Set<string>>();
+const socketAllowedOrigins = (
+  process.env.SOCKET_ALLOWED_ORIGINS ||
+  process.env.ALLOWED_ORIGINS ||
+  ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const notificationCorsOrigin =
+  socketAllowedOrigins.length === 0 || socketAllowedOrigins.includes('*')
+    ? true
+    : socketAllowedOrigins;
 
 @WebSocketGateway({
   namespace: '/notifications',
   cors: {
-    origin: '*',
+    origin: notificationCorsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'X-Platform',
+      'ngrok-skip-browser-warning',
+    ],
   },
 })
 export class NotificationGateway

@@ -123,6 +123,7 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '30d' }}
           TYPEORM_SYNC: ${{ vars.TYPEORM_SYNC || 'false' }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           WEB_BASE_URL: ${{ vars.WEB_BASE_URL }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
@@ -157,18 +158,19 @@ jobs:
           const mongoDb = optional('MONGO_DB', 'orion_chat');
           const mongoUri = `mongodb://${encodeURIComponent(mongoUser)}:${encodeURIComponent(mongoPassword)}@mongodb:27017/${mongoDb}?authSource=admin`;
 
-          const appBaseUrl = optional('APP_BASE_URL', 'https://api.your-domain.com');
-          const webBaseUrl = optional('WEB_BASE_URL', 'https://your-frontend-domain.com');
+          const ec2Host = optional('EC2_HOST');
+          const defaultPublicBaseUrl = ec2Host
+            ? `http://${ec2Host.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+            : 'http://localhost:3000';
+          const appBaseUrl = cleanPublicUrl(optional('APP_BASE_URL')) || defaultPublicBaseUrl;
+          const webBaseUrl = cleanPublicUrl(optional('WEB_BASE_URL')) || appBaseUrl;
           const allowedOrigins = optional('ALLOWED_ORIGINS', webBaseUrl);
           const socketAllowedOrigins = optional('SOCKET_ALLOWED_ORIGINS', allowedOrigins);
-          const onlyOfficeUrl = optional(
-            'ONLYOFFICE_DOCUMENT_SERVER_URL',
-            `${appBaseUrl.replace(/\/+$/, '')}/onlyoffice`,
-          );
-          const onlyOfficeCallbackBaseUrl = optional(
-            'ONLYOFFICE_CALLBACK_BASE_URL',
-            appBaseUrl,
-          );
+          const onlyOfficeUrl =
+            cleanPublicUrl(optional('ONLYOFFICE_DOCUMENT_SERVER_URL')) ||
+            `${appBaseUrl.replace(/\/+$/, '')}/onlyoffice`;
+          const onlyOfficeCallbackBaseUrl =
+            cleanPublicUrl(optional('ONLYOFFICE_CALLBACK_BASE_URL')) || appBaseUrl;
 
           const values = {
             NODE_ENV: 'production',
@@ -230,6 +232,14 @@ jobs:
 
           function optional(name, fallback = '') {
             return process.env[name] || fallback;
+          }
+
+          function cleanPublicUrl(value) {
+            const normalized = String(value || '').trim().replace(/\/+$/, '');
+            if (!normalized) return '';
+            if (normalized.includes('your-domain.com')) return '';
+            if (normalized.includes('your-frontend-domain.com')) return '';
+            return normalized;
           }
 
           function formatEnvValue(value) {

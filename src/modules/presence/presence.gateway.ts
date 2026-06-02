@@ -25,10 +25,22 @@ const socketAllowedOrigins = (
   .split(',')
   .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean);
+const presenceCorsOrigin =
+  socketAllowedOrigins.length === 0 || socketAllowedOrigins.includes('*')
+    ? true
+    : socketAllowedOrigins;
 
 @WebSocketGateway({
   cors: {
-    origin: socketAllowedOrigins.length > 0 ? socketAllowedOrigins : true,
+    origin: presenceCorsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'X-Platform',
+      'ngrok-skip-browser-warning',
+    ],
   },
   namespace: '/presence',
 })
