@@ -122,6 +122,7 @@ jobs:
           MONGO_DB: ${{ vars.MONGO_DB || 'orion_chat' }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '30d' }}
+          TYPEORM_SYNC: ${{ vars.TYPEORM_SYNC || 'false' }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           WEB_BASE_URL: ${{ vars.WEB_BASE_URL }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
@@ -172,7 +173,7 @@ jobs:
           const values = {
             NODE_ENV: 'production',
             PORT: '3000',
-            TYPEORM_SYNC: 'false',
+            TYPEORM_SYNC: optional('TYPEORM_SYNC', 'false'),
             JWT_SECRET: must('JWT_SECRET'),
             JWT_EXPIRES_IN: optional('JWT_EXPIRES_IN', '30d'),
             APP_BASE_URL: appBaseUrl,
