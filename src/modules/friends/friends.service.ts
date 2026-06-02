@@ -11,6 +11,8 @@ import {
 import { In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { GroupMember } from '../group-member/entities/group-member.entity';
+import { PrivacyPolicyService } from '../privacy-settings/privacy-policy.service';
+import { PrivacySettingsService } from '../privacy-settings/privacy-settings.service';
 
 @Injectable()
 export class FriendsService {
@@ -21,6 +23,8 @@ export class FriendsService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(GroupMember)
     private readonly groupMemberRepo: Repository<GroupMember>,
+    private readonly privacyPolicyService: PrivacyPolicyService,
+    private readonly privacySettingsService: PrivacySettingsService,
   ) {}
 
   private getSortedPair(userId: string, friendId: string): [string, string] {
@@ -70,6 +74,23 @@ export class FriendsService {
     }));
   }
 
+  private async toSearchResult(viewerId: string, user: User) {
+    const [canViewFullProfile, settings] = await Promise.all([
+      this.privacyPolicyService.canViewFullProfile(viewerId, user.userId),
+      this.privacySettingsService.findByUserId(user.userId),
+    ]);
+
+    return {
+      id: user.userId,
+      fullName: user.fullName,
+      phoneNumber: canViewFullProfile ? user.phoneNumber : undefined,
+      email: canViewFullProfile ? user.email : undefined,
+      avatarUrl: user.avatarUrl,
+      isOnline: settings.onlineStatusVisibility ? user.isOnline : false,
+      isProfileRestricted: !canViewFullProfile,
+    };
+  }
+
   async getFriends(userId: string) {
     const rows = await this.friendshipRepo.find({
       where: [
@@ -110,18 +131,13 @@ export class FriendsService {
       .take(5)
       .getMany();
 
-    return users
-      .filter(
-        (user) =>
-          !friendIds.has(user.userId) && !blockedIds.has(user.userId),
-      )
-      .map((user) => ({
-        id: user.userId,
-        fullName: user.fullName,
-        phoneNumber: user.phoneNumber,
-        avatarUrl: user.avatarUrl,
-        isOnline: user.isOnline,
-      }));
+    const visibleUsers = users.filter(
+      (user) => !friendIds.has(user.userId) && !blockedIds.has(user.userId),
+    );
+
+    return Promise.all(
+      visibleUsers.map((user) => this.toSearchResult(userId, user)),
+    );
   }
 
   async getSuggestedByMutualGroups(userId: string) {
@@ -238,14 +254,39 @@ export class FriendsService {
     }
 
     const friendship = await this.findFriendshipRecord(userId, friendId);
-    if (!friendship || friendship.status !== FriendshipStatus.ACTIVE) {
+    if (friendship?.status === FriendshipStatus.BLOCKED) {
       throw new NotFoundException('Friendship not found');
     }
 
-    const friend =
-      friendship.userOne.userId === userId
+    const friend = friendship
+      ? friendship.userOne.userId === userId
         ? friendship.userTwo
-        : friendship.userOne;
+        : friendship.userOne
+      : await this.userRepo.findOne({ where: { userId: friendId } });
+
+    if (!friend) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [canViewFullProfile, settings] = await Promise.all([
+      this.privacyPolicyService.canViewFullProfile(userId, friend.userId),
+      this.privacySettingsService.findByUserId(friend.userId),
+    ]);
+    const friendshipSince =
+      friendship?.status === FriendshipStatus.ACTIVE
+        ? friendship.createdAt
+        : undefined;
+
+    if (!canViewFullProfile) {
+      return {
+        id: friend.userId,
+        fullName: friend.fullName,
+        avatarUrl: friend.avatarUrl,
+        isOnline: settings.onlineStatusVisibility ? friend.isOnline : false,
+        friendshipSince,
+        isProfileRestricted: true,
+      };
+    }
 
     return {
       id: friend.userId,
@@ -257,8 +298,9 @@ export class FriendsService {
       gender: friend.gender,
       birthDate: friend.birthDate,
       createdAt: friend.createdAt,
-      isOnline: friend.isOnline,
-      friendshipSince: friendship.createdAt,
+      isOnline: settings.onlineStatusVisibility ? friend.isOnline : false,
+      friendshipSince,
+      isProfileRestricted: false,
     };
   }
 

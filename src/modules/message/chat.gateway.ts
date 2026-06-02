@@ -9,7 +9,12 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject, ValidationPipe } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Logger,
+  Inject,
+  ValidationPipe,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -32,6 +37,7 @@ import {
   TypingSocketDto,
 } from './dto/chat-socket.dto';
 import { ChatMembershipService } from './services/chat-membership.service';
+import { PrivacyPolicyService } from '../privacy-settings/privacy-policy.service';
 
 const onlineUsers = new Map<string, string>();
 
@@ -79,6 +85,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly usersService: UsersService,
     private readonly notificationService: NotificationService,
     private readonly chatMembershipService: ChatMembershipService,
+    private readonly privacyPolicyService: PrivacyPolicyService,
     @InjectRepository(Conversation)
     private readonly conversationRepo: Repository<Conversation>,
     @InjectRepository(GroupConversation)
@@ -122,6 +129,46 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       fullName: null,
       avatarUrl: null,
     };
+  }
+
+  private async assertSocketCanSendMessage(
+    senderId: string,
+    conversationId: string,
+  ) {
+    const conversation = await this.conversationRepo.findOne({
+      where: { conversationId },
+    });
+
+    if (!conversation || conversation.type !== ConversationType.PRIVATE) {
+      return;
+    }
+
+    const participants = await this.participantRepo.find({
+      where: { conversationId },
+    });
+    const blockedParticipant = participants.find((item) => item.isBlocked);
+
+    if (blockedParticipant) {
+      if (blockedParticipant.userId === senderId) {
+        throw new ForbiddenException(
+          `You are blocked from sending messages in this conversation. Blocked by: ${blockedParticipant.blockedBy}`,
+        );
+      }
+
+      if (blockedParticipant.blockedBy === senderId) {
+        throw new ForbiddenException(
+          'You blocked this user. Unblock them to send messages.',
+        );
+      }
+    }
+
+    const receiver = participants.find((item) => item.userId !== senderId);
+    if (receiver?.userId) {
+      await this.privacyPolicyService.assertCanMessage(
+        senderId,
+        receiver.userId,
+      );
+    }
   }
 
   handleConnection(client: Socket) {
@@ -637,6 +684,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         senderId,
         data.conversationId,
       );
+      await this.assertSocketCanSendMessage(senderId, data.conversationId);
 
       let replyToMessagePreview:
         | {

@@ -41,8 +41,9 @@ export class UsersController {
   }
 
   @Get()
-  findAll() {
-    return this.usersService.findAll();
+  @UseGuards(JwtAuthGuard)
+  findAll(@CurrentUser() user: CurrentUserPayload) {
+    return this.usersService.findAll(user.userId);
   }
 
   @Get('profile')

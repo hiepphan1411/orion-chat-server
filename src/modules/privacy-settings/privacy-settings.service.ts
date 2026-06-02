@@ -6,6 +6,12 @@ import {
   CreatePrivacySettingsDto,
   UpdatePrivacySettingsDto,
 } from './dto/privacy-settings.dto';
+import {
+  ContactPermission,
+  normalizeContactPermission,
+  normalizeProfileVisibility,
+  ProfileVisibility,
+} from './privacy-settings.constants';
 
 @Injectable()
 export class PrivacySettingsService {
@@ -16,7 +22,16 @@ export class PrivacySettingsService {
   ) {}
 
   async create(createDto: CreatePrivacySettingsDto): Promise<PrivacySettings> {
-    const settings = this.settingsRepository.create(createDto);
+    const settings = this.settingsRepository.create({
+      ...createDto,
+      profileVisibility: normalizeProfileVisibility(
+        createDto.profileVisibility,
+      ),
+      messagePermission: normalizeContactPermission(
+        createDto.messagePermission,
+      ),
+      callPermission: normalizeContactPermission(createDto.callPermission),
+    });
     return await this.settingsRepository.save(settings);
   }
 
@@ -36,14 +51,14 @@ export class PrivacySettingsService {
   async createDefaultSettings(userId: string): Promise<PrivacySettings> {
     const defaultSettings = this.settingsRepository.create({
       userId,
-      profileVisibility: 'friends',
-      messagePermission: 'friends',
+      profileVisibility: ProfileVisibility.FRIENDS,
+      messagePermission: ContactPermission.FRIENDS,
       lastSeenVisibility: true,
       onlineStatusVisibility: true,
       allowAIToSeeProfile: false,
       allowAIToSeeMessages: false,
       allowAIToSeeMedia: false,
-      callPermission: 'friends',
+      callPermission: ContactPermission.FRIENDS,
       allowScreenSharing: true,
       allowDataCollection: false,
       allowAnalytics: false,
@@ -63,10 +78,14 @@ export class PrivacySettingsService {
 
     // Explicitly assign each field
     if (updateDto.profileVisibility !== undefined) {
-      settings.profileVisibility = updateDto.profileVisibility;
+      settings.profileVisibility = normalizeProfileVisibility(
+        updateDto.profileVisibility,
+      );
     }
     if (updateDto.messagePermission !== undefined) {
-      settings.messagePermission = updateDto.messagePermission;
+      settings.messagePermission = normalizeContactPermission(
+        updateDto.messagePermission,
+      );
     }
     if (updateDto.lastSeenVisibility !== undefined) {
       settings.lastSeenVisibility = updateDto.lastSeenVisibility;
@@ -84,7 +103,9 @@ export class PrivacySettingsService {
       settings.allowAIToSeeMedia = updateDto.allowAIToSeeMedia;
     }
     if (updateDto.callPermission !== undefined) {
-      settings.callPermission = updateDto.callPermission;
+      settings.callPermission = normalizeContactPermission(
+        updateDto.callPermission,
+      );
     }
     if (updateDto.allowScreenSharing !== undefined) {
       settings.allowScreenSharing = updateDto.allowScreenSharing;

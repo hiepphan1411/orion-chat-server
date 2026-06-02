@@ -15,6 +15,7 @@ import { Message, MessageSchema } from '../message/message.schema';
 import { MessageModule } from '../message/message.module';
 import { User } from '../users/entities/user.entity';
 import { Friendship } from '../friendship/entities/friendship.entity';
+import { PrivacySettingsModule } from '../privacy-settings/privacy-settings.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { Friendship } from '../friendship/entities/friendship.entity';
     MongooseModule.forFeature([{ name: Message.name, schema: MessageSchema }]),
     MessageModule,
     GroupsModule,
+    PrivacySettingsModule,
   ],
   controllers: [ConversationController],
   providers: [ConversationService],

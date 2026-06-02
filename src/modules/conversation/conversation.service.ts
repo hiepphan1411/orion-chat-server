@@ -27,6 +27,7 @@ import {
   Friendship,
   FriendshipStatus,
 } from '../friendship/entities/friendship.entity';
+import { PrivacyPolicyService } from '../privacy-settings/privacy-policy.service';
 
 const bcryptLib = bcrypt as unknown as {
   hash: (value: string, saltRounds: number) => Promise<string>;
@@ -204,6 +205,7 @@ export class ConversationService {
     private readonly friendshipRepo: Repository<Friendship>,
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
+    private readonly privacyPolicyService: PrivacyPolicyService,
   ) {}
 
   private async assertNoBlockedFriendship(userId: string, otherUserId: string) {
@@ -425,6 +427,10 @@ export class ConversationService {
     }
 
     await this.assertNoBlockedFriendship(currentUserId, recipientId);
+    await this.privacyPolicyService.assertCanMessage(
+      currentUserId,
+      recipientId,
+    );
 
     // Try to find existing PRIVATE conversation containing both participants
     const existingConversation = await this.conversationRepo
@@ -814,6 +820,10 @@ export class ConversationService {
 
       if (otherParticipant?.userId) {
         await this.assertNoBlockedFriendship(
+          actorUserId,
+          otherParticipant.userId,
+        );
+        await this.privacyPolicyService.assertCanMessage(
           actorUserId,
           otherParticipant.userId,
         );

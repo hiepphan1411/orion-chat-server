@@ -1,16 +1,25 @@
-import { IsString, IsOptional, IsBoolean, IsUUID } from 'class-validator';
+import { IsOptional, IsBoolean, IsUUID, IsEnum, IsIn } from 'class-validator';
+import {
+  ContactPermission,
+  ProfileVisibility,
+} from '../privacy-settings.constants';
 
 export class CreatePrivacySettingsDto {
   @IsUUID()
   userId: string;
 
   @IsOptional()
-  @IsString()
-  profileVisibility?: string;
+  @IsEnum(ProfileVisibility)
+  profileVisibility?: ProfileVisibility;
 
   @IsOptional()
-  @IsString()
-  messagePermission?: string;
+  @IsIn([
+    ContactPermission.EVERYONE,
+    ContactPermission.FRIENDS,
+    ContactPermission.NOBODY,
+    'none',
+  ])
+  messagePermission?: ContactPermission | 'none';
 
   @IsOptional()
   @IsBoolean()
@@ -33,8 +42,13 @@ export class CreatePrivacySettingsDto {
   allowAIToSeeMedia?: boolean;
 
   @IsOptional()
-  @IsString()
-  callPermission?: string;
+  @IsIn([
+    ContactPermission.EVERYONE,
+    ContactPermission.FRIENDS,
+    ContactPermission.NOBODY,
+    'none',
+  ])
+  callPermission?: ContactPermission | 'none';
 
   @IsOptional()
   @IsBoolean()
@@ -51,12 +65,17 @@ export class CreatePrivacySettingsDto {
 
 export class UpdatePrivacySettingsDto {
   @IsOptional()
-  @IsString()
-  profileVisibility?: string;
+  @IsEnum(ProfileVisibility)
+  profileVisibility?: ProfileVisibility;
 
   @IsOptional()
-  @IsString()
-  messagePermission?: string;
+  @IsIn([
+    ContactPermission.EVERYONE,
+    ContactPermission.FRIENDS,
+    ContactPermission.NOBODY,
+    'none',
+  ])
+  messagePermission?: ContactPermission | 'none';
 
   @IsOptional()
   @IsBoolean()
@@ -79,8 +98,13 @@ export class UpdatePrivacySettingsDto {
   allowAIToSeeMedia?: boolean;
 
   @IsOptional()
-  @IsString()
-  callPermission?: string;
+  @IsIn([
+    ContactPermission.EVERYONE,
+    ContactPermission.FRIENDS,
+    ContactPermission.NOBODY,
+    'none',
+  ])
+  callPermission?: ContactPermission | 'none';
 
   @IsOptional()
   @IsBoolean()
