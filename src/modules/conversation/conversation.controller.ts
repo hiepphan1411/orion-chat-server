@@ -205,8 +205,8 @@ export class ConversationController {
    *
    * @route GET /conversations/:conversationId/messages?limit=50&cursor=lastMessageId
    * @param {string} conversationId
-   * @param {string} cursor Message ID
-   * @param {string} limit Số tin nhắn muốn lấy (default = 30)
+   * @param {string} cursor Message ID hoặc createdAt
+   * @param {string} limit Số tin nhắn muốn lấy (default = 50)
    * @returns {MessageResponse[]} Mảng tin nhắn
    *
    * Message response fields:
@@ -232,7 +232,7 @@ export class ConversationController {
         conversationId,
         user.userId,
         cursor,
-        limit ? Number(limit) : 30,
+        limit ? Number(limit) : 50,
       );
     } catch (error) {
       console.error('=== ERROR getMessagesByConversation ===');
