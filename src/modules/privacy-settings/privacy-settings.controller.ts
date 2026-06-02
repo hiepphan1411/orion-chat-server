@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrivacySettingsService } from './privacy-settings.service';
 import {
@@ -23,7 +24,15 @@ export class PrivacySettingsController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(@Body() createDto: CreatePrivacySettingsDto) {
+  create(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() createDto: CreatePrivacySettingsDto,
+  ) {
+    if (createDto.userId !== user.userId) {
+      throw new ForbiddenException(
+        'Cannot create privacy settings for another user',
+      );
+    }
     return this.service.create(createDto);
   }
 
@@ -48,22 +57,44 @@ export class PrivacySettingsController {
   // GENERIC ROUTES WITH PARAMETERS AFTER SPECIFIC ROUTES
   @Get(':userId')
   @UseGuards(JwtAuthGuard)
-  findByUserId(@Param('userId') userId: string) {
+  findByUserId(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('userId') userId: string,
+  ) {
+    if (userId !== user.userId) {
+      throw new ForbiddenException(
+        'Cannot view privacy settings for another user',
+      );
+    }
     return this.service.findByUserId(userId);
   }
 
   @Patch(':userId')
   @UseGuards(JwtAuthGuard)
   update(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('userId') userId: string,
     @Body() updateDto: UpdatePrivacySettingsDto,
   ) {
+    if (userId !== user.userId) {
+      throw new ForbiddenException(
+        'Cannot update privacy settings for another user',
+      );
+    }
     return this.service.update(userId, updateDto);
   }
 
   @Delete(':userId')
   @UseGuards(JwtAuthGuard)
-  delete(@Param('userId') userId: string) {
+  delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('userId') userId: string,
+  ) {
+    if (userId !== user.userId) {
+      throw new ForbiddenException(
+        'Cannot delete privacy settings for another user',
+      );
+    }
     return this.service.delete(userId);
   }
 }

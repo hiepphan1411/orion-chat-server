@@ -6,11 +6,13 @@ import { GroupMember } from '../group-member/entities/group-member.entity';
 import { FriendsController } from './friends.controller';
 import { FriendsService } from './friends.service';
 import { CommonModule } from 'src/common/common.module';
+import { PrivacySettingsModule } from '../privacy-settings/privacy-settings.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Friendship, User, GroupMember]),
     CommonModule,
+    PrivacySettingsModule,
   ],
   controllers: [FriendsController],
   providers: [FriendsService],
