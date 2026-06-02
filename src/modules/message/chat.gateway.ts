@@ -56,6 +56,7 @@ const chatCorsOrigin =
     allowedHeaders: [
       'Authorization',
       'Content-Type',
+      'X-Platform',
       'ngrok-skip-browser-warning',
     ],
   },

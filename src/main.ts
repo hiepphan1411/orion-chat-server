@@ -52,6 +52,7 @@ async function bootstrap() {
     allowedHeaders: [
       'Authorization',
       'Content-Type',
+      'X-Platform',
       'ngrok-skip-browser-warning',
     ],
     optionsSuccessStatus: 204,
