@@ -4,6 +4,11 @@ on:
   push:
     branches: [develop]
   workflow_dispatch:
+    inputs:
+      reset_local_database_once:
+        description: 'Set true one time only to recreate local Postgres/Mongo volumes with new credentials'
+        required: false
+        default: 'false'
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/orion-chat-backend
@@ -67,7 +72,6 @@ jobs:
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
           MONGO_USER: ${{ secrets.MONGO_USER }}
           MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -86,6 +90,8 @@ jobs:
             POSTGRES_DB
             POSTGRES_USER
             POSTGRES_PASSWORD
+            MONGO_USER
+            MONGO_PASSWORD
             JWT_SECRET
             AWS_ACCESS_KEY_ID
             AWS_SECRET_ACCESS_KEY
@@ -101,17 +107,6 @@ jobs:
             fi
           done
 
-          if [ -z "$MONGO_URI" ]; then
-            if [ -z "$MONGO_USER" ]; then
-              echo "Missing secret: MONGO_USER. Set it for local MongoDB, or set MONGO_URI to use MongoDB Atlas."
-              exit 1
-            fi
-            if [ -z "$MONGO_PASSWORD" ]; then
-              echo "Missing secret: MONGO_PASSWORD. Set it for local MongoDB, or set MONGO_URI to use MongoDB Atlas."
-              exit 1
-            fi
-          fi
-
           if [ -z "$EC2_SSH_KEY" ] && [ -z "$EC2_SSH_KEY_B64" ]; then
             echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
             exit 1
@@ -125,7 +120,6 @@ jobs:
           MONGO_USER: ${{ secrets.MONGO_USER }}
           MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
           MONGO_DB: ${{ vars.MONGO_DB || 'orion_chat' }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '30d' }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
@@ -157,16 +151,10 @@ jobs:
         run: |
           set -e
           node <<'NODE' > .env.production
-          const explicitMongoUri = optional('MONGO_URI');
-          const useLocalMongo = !explicitMongoUri;
-          const mongoUser = useLocalMongo ? must('MONGO_USER') : optional('MONGO_USER');
-          const mongoPassword = useLocalMongo
-            ? must('MONGO_PASSWORD')
-            : optional('MONGO_PASSWORD');
+          const mongoUser = must('MONGO_USER');
+          const mongoPassword = must('MONGO_PASSWORD');
           const mongoDb = optional('MONGO_DB', 'orion_chat');
-          const mongoUri =
-            explicitMongoUri ||
-            `mongodb://${encodeURIComponent(mongoUser)}:${encodeURIComponent(mongoPassword)}@mongodb:27017/${mongoDb}?authSource=admin`;
+          const mongoUri = `mongodb://${encodeURIComponent(mongoUser)}:${encodeURIComponent(mongoPassword)}@mongodb:27017/${mongoDb}?authSource=admin`;
 
           const appBaseUrl = optional('APP_BASE_URL', 'https://api.your-domain.com');
           const webBaseUrl = optional('WEB_BASE_URL', 'https://your-frontend-domain.com');
@@ -309,12 +297,13 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          RESET_LOCAL_DATABASE_ONCE: ${{ github.event.inputs.reset_local_database_once || vars.RESET_LOCAL_DATABASE_ONCE || 'false' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ env.EC2_SSH_KEY_DECODED }}
           port: ${{ secrets.EC2_PORT || 22 }}
-          envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD
+          envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD,RESET_LOCAL_DATABASE_ONCE
           script: |
             set -e
             cd ~/orion-chat-backend
@@ -322,37 +311,37 @@ jobs:
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
             export DOCKER_IMAGE="$DOCKER_USERNAME/orion-chat-backend:$IMAGE_TAG"
-            docker compose -f docker-compose.backend.yml --env-file .env.production pull backend onlyoffice
+            docker compose -f docker-compose.backend.yml --env-file .env.production pull backend postgres mongodb redis onlyoffice
 
-            if grep -Eq '^MONGO_URI=.*@mongodb(:|/)' .env.production; then
-              export COMPOSE_PROFILES=local-mongo
-              DATA_SERVICES="postgres mongodb redis onlyoffice"
-              MONGO_LOG_SERVICE="mongodb"
-              echo "Using local MongoDB container"
-            else
-              unset COMPOSE_PROFILES
-              DATA_SERVICES="postgres redis onlyoffice"
-              MONGO_LOG_SERVICE=""
-              echo "Using external MongoDB from MONGO_URI"
-              COMPOSE_PROFILES=local-mongo docker compose -f docker-compose.backend.yml --env-file .env.production stop mongodb || true
-              COMPOSE_PROFILES=local-mongo docker compose -f docker-compose.backend.yml --env-file .env.production rm -f mongodb || true
+            echo "[INFO] Effective database hosts from .env.production:"
+            grep -E '^(DB_HOST|DB_PORT|DB_NAME|DB_USER|REDIS_URL)=' .env.production || true
+            grep -E '^MONGO_URI=.*@mongodb(:|/)' .env.production >/dev/null \
+              && echo "MONGO_URI=local mongodb container" \
+              || echo "MONGO_URI=not local mongodb container"
+
+            if [ "$RESET_LOCAL_DATABASE_ONCE" = "true" ]; then
+              echo "[RESET] RESET_LOCAL_DATABASE_ONCE=true. Recreating local Postgres/Mongo data volumes once."
+              docker compose -f docker-compose.backend.yml --env-file .env.production stop backend postgres mongodb || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production rm -f backend postgres mongodb || true
+              docker volume rm orion-chat-backend_postgres_data orion-chat-backend_mongo_data || true
+              echo "[RESET] Done. Set RESET_LOCAL_DATABASE_ONCE back to false/remove it after this run."
             fi
 
             # Start data services first so failures are easier to diagnose.
-            docker compose -f docker-compose.backend.yml --env-file .env.production up -d $DATA_SERVICES || true
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d postgres mongodb redis onlyoffice || true
 
             if ! docker compose -f docker-compose.backend.yml --env-file .env.production up -d --remove-orphans; then
               echo "[DIAG] docker compose up failed. Printing status and recent logs..."
               docker compose -f docker-compose.backend.yml --env-file .env.production ps || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 postgres || true
-              if [ -n "$MONGO_LOG_SERVICE" ]; then
-                docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 "$MONGO_LOG_SERVICE" || true
-              fi
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 mongodb || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 redis || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 onlyoffice || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 backend || true
               exit 1
             fi
+
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d --force-recreate --no-deps backend
 
             if command -v nginx >/dev/null 2>&1 && [ -f deploy/nginx/orion-backend.conf ]; then
               if sudo -n true 2>/dev/null; then
