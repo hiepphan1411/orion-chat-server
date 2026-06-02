@@ -34,20 +34,23 @@ import {
 import { ChatMembershipService } from './services/chat-membership.service';
 
 const onlineUsers = new Map<string, string>();
+const socketAllowedOrigins = (
+  process.env.SOCKET_ALLOWED_ORIGINS ||
+  process.env.ALLOWED_ORIGINS ||
+  ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const chatCorsOrigin =
+  socketAllowedOrigins.length === 0 || socketAllowedOrigins.includes('*')
+    ? true
+    : socketAllowedOrigins;
 
 @WebSocketGateway({
   namespace: '/chat',
   cors: {
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:5174',
-      'http://localhost:3001',
-      'https://deceitfully-unquailing-haylee.ngrok-free.dev',
-      'https://foveate-tristan-disepalous.ngrok-free.dev',
-      'https://d1m0lu9iwqsfsh.cloudfront.net',
-      'http://orion-web-chat-staging.s3-website-ap-southeast-1.amazonaws.com',
-    ],
+    origin: chatCorsOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
     allowedHeaders: [

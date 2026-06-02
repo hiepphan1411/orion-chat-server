@@ -5,13 +5,21 @@ import { json, urlencoded } from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module';
 
+const parseOrigins = (raw?: string): string[] => {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+};
+
 async function bootstrap() {
   console.log('[bootstrap] Starting bootstrap...');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   console.log('[bootstrap] NestFactory.create completed');
 
   // Danh sách allowed origins - KHÔNG có trailing slash
-  const allowedOrigins = [
+  const defaultAllowedOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
     'http://localhost:5174',
@@ -21,6 +29,10 @@ async function bootstrap() {
     'https://deceitfully-unquailing-haylee.ngrok-free.dev',
     'https://foveate-tristan-disepalous.ngrok-free.dev',
   ];
+  const envAllowedOrigins = parseOrigins(process.env.ALLOWED_ORIGINS);
+  const allowAllOrigins = envAllowedOrigins.includes('*');
+  const allowedOrigins =
+    envAllowedOrigins.length > 0 ? envAllowedOrigins : defaultAllowedOrigins;
 
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
@@ -29,7 +41,7 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       // Cho phép không có origin (như Postman, mobile app, v.v.)
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowAllOrigins || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -37,6 +49,11 @@ async function bootstrap() {
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'ngrok-skip-browser-warning',
+    ],
     optionsSuccessStatus: 204,
   });
 
