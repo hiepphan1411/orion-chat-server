@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   backend:
     image: ${DOCKER_IMAGE}
@@ -12,10 +10,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      onlyoffice:
+        condition: service_started
     volumes:
       - backend_uploads:/app/uploads
 
@@ -43,6 +41,8 @@ services:
   mongodb:
     image: mongo:7
     container_name: orion_mongodb
+    profiles:
+      - local-mongo
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
@@ -74,8 +74,27 @@ services:
     volumes:
       - redis_data:/data
 
+  onlyoffice:
+    image: onlyoffice/documentserver:8.3
+    container_name: orion_onlyoffice
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: ${ONLYOFFICE_JWT_ENABLED:-false}
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+    ports:
+      - '127.0.0.1:8088:80'
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_lib:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+
 volumes:
   backend_uploads:
   postgres_data:
   mongo_data:
   redis_data:
+  onlyoffice_data:
+  onlyoffice_logs:
+  onlyoffice_lib:
+  onlyoffice_db:

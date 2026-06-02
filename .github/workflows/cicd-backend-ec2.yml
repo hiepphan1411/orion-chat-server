@@ -57,19 +57,198 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Validate required secrets
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_KEY_B64: ${{ secrets.EC2_SSH_KEY_B64 }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          ESMS_API_KEY: ${{ secrets.ESMS_API_KEY }}
+          ESMS_SECRET_KEY: ${{ secrets.ESMS_SECRET_KEY }}
         run: |
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "Missing secret: EC2_HOST"
-            exit 1
+          set -e
+          required=(
+            DOCKER_USERNAME
+            DOCKER_PASSWORD
+            EC2_HOST
+            EC2_USER
+            POSTGRES_DB
+            POSTGRES_USER
+            POSTGRES_PASSWORD
+            JWT_SECRET
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            AWS_S3_BUCKET
+            ESMS_API_KEY
+            ESMS_SECRET_KEY
+          )
+
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "Missing secret: $name"
+              exit 1
+            fi
+          done
+
+          if [ -z "$MONGO_URI" ]; then
+            if [ -z "$MONGO_USER" ]; then
+              echo "Missing secret: MONGO_USER. Set it for local MongoDB, or set MONGO_URI to use MongoDB Atlas."
+              exit 1
+            fi
+            if [ -z "$MONGO_PASSWORD" ]; then
+              echo "Missing secret: MONGO_PASSWORD. Set it for local MongoDB, or set MONGO_URI to use MongoDB Atlas."
+              exit 1
+            fi
           fi
-          if [ -z "${{ secrets.EC2_USER }}" ]; then
-            echo "Missing secret: EC2_USER"
-            exit 1
-          fi
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ] && [ -z "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+
+          if [ -z "$EC2_SSH_KEY" ] && [ -z "$EC2_SSH_KEY_B64" ]; then
             echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
             exit 1
           fi
+
+      - name: Render production env file
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          MONGO_DB: ${{ vars.MONGO_DB || 'orion_chat' }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '30d' }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          WEB_BASE_URL: ${{ vars.WEB_BASE_URL }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          SOCKET_ALLOWED_ORIGINS: ${{ vars.SOCKET_ALLOWED_ORIGINS }}
+          ONLYOFFICE_DOCUMENT_SERVER_URL: ${{ vars.ONLYOFFICE_DOCUMENT_SERVER_URL }}
+          ONLYOFFICE_CALLBACK_BASE_URL: ${{ vars.ONLYOFFICE_CALLBACK_BASE_URL }}
+          ONLYOFFICE_CALLBACK_SECRET: ${{ secrets.ONLYOFFICE_CALLBACK_SECRET }}
+          ONLYOFFICE_JWT_ENABLED: ${{ vars.ONLYOFFICE_JWT_ENABLED || 'false' }}
+          ONLYOFFICE_JWT_SECRET: ${{ secrets.ONLYOFFICE_JWT_SECRET }}
+          STREAM_API_KEY: ${{ secrets.STREAM_API_KEY }}
+          STREAM_SECRET_KEY: ${{ secrets.STREAM_SECRET_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_S3_PUBLIC_BASE_URL: ${{ vars.AWS_S3_PUBLIC_BASE_URL }}
+          AWS_S3_ENDPOINT: ${{ vars.AWS_S3_ENDPOINT }}
+          AWS_S3_FORCE_PATH_STYLE: ${{ vars.AWS_S3_FORCE_PATH_STYLE || 'false' }}
+          ESMS_API_KEY: ${{ secrets.ESMS_API_KEY }}
+          ESMS_SECRET_KEY: ${{ secrets.ESMS_SECRET_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gemini' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-flash-latest' }}
+          OLLAMA_API_URL: ${{ vars.OLLAMA_API_URL }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL }}
+        run: |
+          set -e
+          node <<'NODE' > .env.production
+          const explicitMongoUri = optional('MONGO_URI');
+          const useLocalMongo = !explicitMongoUri;
+          const mongoUser = useLocalMongo ? must('MONGO_USER') : optional('MONGO_USER');
+          const mongoPassword = useLocalMongo
+            ? must('MONGO_PASSWORD')
+            : optional('MONGO_PASSWORD');
+          const mongoDb = optional('MONGO_DB', 'orion_chat');
+          const mongoUri =
+            explicitMongoUri ||
+            `mongodb://${encodeURIComponent(mongoUser)}:${encodeURIComponent(mongoPassword)}@mongodb:27017/${mongoDb}?authSource=admin`;
+
+          const appBaseUrl = optional('APP_BASE_URL', 'https://api.your-domain.com');
+          const webBaseUrl = optional('WEB_BASE_URL', 'https://your-frontend-domain.com');
+          const allowedOrigins = optional('ALLOWED_ORIGINS', webBaseUrl);
+          const socketAllowedOrigins = optional('SOCKET_ALLOWED_ORIGINS', allowedOrigins);
+          const onlyOfficeUrl = optional(
+            'ONLYOFFICE_DOCUMENT_SERVER_URL',
+            `${appBaseUrl.replace(/\/+$/, '')}/onlyoffice`,
+          );
+          const onlyOfficeCallbackBaseUrl = optional(
+            'ONLYOFFICE_CALLBACK_BASE_URL',
+            appBaseUrl,
+          );
+
+          const values = {
+            NODE_ENV: 'production',
+            PORT: '3000',
+            TYPEORM_SYNC: 'false',
+            JWT_SECRET: must('JWT_SECRET'),
+            JWT_EXPIRES_IN: optional('JWT_EXPIRES_IN', '30d'),
+            APP_BASE_URL: appBaseUrl,
+            WEB_BASE_URL: webBaseUrl,
+            ALLOWED_ORIGINS: allowedOrigins,
+            SOCKET_ALLOWED_ORIGINS: socketAllowedOrigins,
+            DB_HOST: 'postgres',
+            DB_PORT: '5432',
+            DB_USER: must('POSTGRES_USER'),
+            DB_PASSWORD: must('POSTGRES_PASSWORD'),
+            DB_NAME: must('POSTGRES_DB'),
+            MONGO_URI: mongoUri,
+            MONGO_INITDB_ROOT_USERNAME: mongoUser,
+            MONGO_INITDB_ROOT_PASSWORD: mongoPassword,
+            REDIS_HOST: 'redis',
+            REDIS_PORT: '6379',
+            REDIS_URL: 'redis://redis:6379',
+            ONLYOFFICE_DOCUMENT_SERVER_URL: onlyOfficeUrl,
+            ONLYOFFICE_CALLBACK_BASE_URL: onlyOfficeCallbackBaseUrl,
+            ONLYOFFICE_CALLBACK_SECRET: optional(
+              'ONLYOFFICE_CALLBACK_SECRET',
+              must('JWT_SECRET'),
+            ),
+            ONLYOFFICE_JWT_ENABLED: optional('ONLYOFFICE_JWT_ENABLED', 'false'),
+            ONLYOFFICE_JWT_SECRET: optional('ONLYOFFICE_JWT_SECRET'),
+            STREAM_API_KEY: optional('STREAM_API_KEY'),
+            STREAM_SECRET_KEY: optional('STREAM_SECRET_KEY'),
+            AWS_REGION: optional('AWS_REGION', 'ap-southeast-1'),
+            AWS_ACCESS_KEY_ID: must('AWS_ACCESS_KEY_ID'),
+            AWS_SECRET_ACCESS_KEY: must('AWS_SECRET_ACCESS_KEY'),
+            AWS_S3_BUCKET: must('AWS_S3_BUCKET'),
+            AWS_S3_PUBLIC_BASE_URL: optional('AWS_S3_PUBLIC_BASE_URL'),
+            AWS_S3_ENDPOINT: optional('AWS_S3_ENDPOINT'),
+            AWS_S3_FORCE_PATH_STYLE: optional('AWS_S3_FORCE_PATH_STYLE', 'false'),
+            ESMS_API_KEY: must('ESMS_API_KEY'),
+            ESMS_SECRET_KEY: must('ESMS_SECRET_KEY'),
+            AI_PROVIDER: optional('AI_PROVIDER', 'gemini'),
+            GEMINI_API_KEY: optional('GEMINI_API_KEY'),
+            GEMINI_API_KEYS: optional('GEMINI_API_KEYS'),
+            GEMINI_MODEL: optional('GEMINI_MODEL', 'gemini-flash-latest'),
+            OLLAMA_API_URL: optional('OLLAMA_API_URL'),
+            OLLAMA_MODEL: optional('OLLAMA_MODEL'),
+          };
+
+          for (const [key, value] of Object.entries(values)) {
+            process.stdout.write(`${key}=${formatEnvValue(value)}\n`);
+          }
+
+          function must(name) {
+            const value = optional(name);
+            if (!value) throw new Error(`Missing environment value: ${name}`);
+            return value;
+          }
+
+          function optional(name, fallback = '') {
+            return process.env[name] || fallback;
+          }
+
+          function formatEnvValue(value) {
+            const normalized = String(value ?? '').replace(/\r?\n/g, '');
+            if (/^[A-Za-z0-9_./:@%+=,-]*$/.test(normalized)) return normalized;
+            return JSON.stringify(normalized);
+          }
+          NODE
 
       - name: Prepare SSH private key file
         run: |
@@ -121,7 +300,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ env.EC2_SSH_KEY_DECODED }}
           port: ${{ secrets.EC2_PORT || 22 }}
-          source: 'docker-compose.backend.yml'
+          source: 'docker-compose.backend.yml,.env.production,deploy/nginx/orion-backend.conf'
           target: '~/orion-chat-backend'
 
       - name: Deploy via SSH
@@ -143,19 +322,49 @@ jobs:
             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
             export DOCKER_IMAGE="$DOCKER_USERNAME/orion-chat-backend:$IMAGE_TAG"
-            docker compose -f docker-compose.backend.yml --env-file .env.production pull backend
+            docker compose -f docker-compose.backend.yml --env-file .env.production pull backend onlyoffice
+
+            if grep -Eq '^MONGO_URI=.*@mongodb(:|/)' .env.production; then
+              export COMPOSE_PROFILES=local-mongo
+              DATA_SERVICES="postgres mongodb redis onlyoffice"
+              MONGO_LOG_SERVICE="mongodb"
+              echo "Using local MongoDB container"
+            else
+              unset COMPOSE_PROFILES
+              DATA_SERVICES="postgres redis onlyoffice"
+              MONGO_LOG_SERVICE=""
+              echo "Using external MongoDB from MONGO_URI"
+              COMPOSE_PROFILES=local-mongo docker compose -f docker-compose.backend.yml --env-file .env.production stop mongodb || true
+              COMPOSE_PROFILES=local-mongo docker compose -f docker-compose.backend.yml --env-file .env.production rm -f mongodb || true
+            fi
 
             # Start data services first so failures are easier to diagnose.
-            docker compose -f docker-compose.backend.yml --env-file .env.production up -d postgres mongodb redis || true
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d $DATA_SERVICES || true
 
             if ! docker compose -f docker-compose.backend.yml --env-file .env.production up -d --remove-orphans; then
               echo "[DIAG] docker compose up failed. Printing status and recent logs..."
               docker compose -f docker-compose.backend.yml --env-file .env.production ps || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 postgres || true
-              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 mongodb || true
+              if [ -n "$MONGO_LOG_SERVICE" ]; then
+                docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 "$MONGO_LOG_SERVICE" || true
+              fi
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 redis || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 onlyoffice || true
               docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 backend || true
               exit 1
+            fi
+
+            if command -v nginx >/dev/null 2>&1 && [ -f deploy/nginx/orion-backend.conf ]; then
+              if sudo -n true 2>/dev/null; then
+                sudo install -m 0644 deploy/nginx/orion-backend.conf /etc/nginx/sites-available/orion-backend
+                if [ ! -e /etc/nginx/sites-enabled/orion-backend ]; then
+                  sudo ln -s /etc/nginx/sites-available/orion-backend /etc/nginx/sites-enabled/orion-backend
+                fi
+                sudo nginx -t
+                sudo systemctl reload nginx
+              else
+                echo "[WARN] Nginx config uploaded, but passwordless sudo is not available. Apply deploy/nginx/orion-backend.conf manually."
+              fi
             fi
 
             docker image prune -f
@@ -164,4 +373,4 @@ jobs:
 
       - name: Cleanup SSH key file
         if: always()
-        run: rm -f ./.ec2_key.pem
+        run: rm -f ./.ec2_key.pem ./.env.production
