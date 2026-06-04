@@ -10,7 +10,11 @@ import {
   FriendRequestStatus,
 } from './entities/friend-request.entity';
 import { User } from '../users/entities/user.entity';
-import { Friendship } from '../friendship/entities/friendship.entity';
+import {
+  Friendship,
+  FriendshipStatus,
+} from '../friendship/entities/friendship.entity';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class FriendRequestService {
@@ -21,6 +25,7 @@ export class FriendRequestService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(Friendship)
     private readonly friendshipRepo: Repository<Friendship>,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async sendRequest(
@@ -49,6 +54,9 @@ export class FriendRequestService {
     });
 
     if (existingFriendship) {
+      if (existingFriendship.status === FriendshipStatus.BLOCKED) {
+        throw new BadRequestException('User is blocked');
+      }
       throw new BadRequestException('Already friends');
     }
 
@@ -78,13 +86,46 @@ export class FriendRequestService {
       respondedAt: null,
     });
 
-    return this.requestRepo.save(request);
+    const savedRequest = await this.requestRepo.save(request);
+
+    // Gửi thông báo realtime cho người được mời kết bạn.
+    await this.notificationService.createAndEmit({
+      userId: receiver.userId,
+      type: 'friend_request',
+      title: 'New friend request',
+      body: `${sender.fullName} has sent you a friend request.`,
+      link: '/friends',
+      metadata: {
+        requestId: savedRequest.requestId,
+        senderId: sender.userId,
+        receiverId: receiver.userId,
+        status: savedRequest.status,
+      },
+    });
+
+    return savedRequest;
   }
 
+  /**
+   * Lấy danh sách lời mời kết bạn đến (từ người khác gửi)
+   */
   async getIncoming(userId: string): Promise<FriendRequest[]> {
     return this.requestRepo.find({
       where: {
         receiver: { userId },
+        status: FriendRequestStatus.PENDING,
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Lấy danh sách lời mời kết bạn đi (mình gửi cho người khác)
+   */
+  async getOutgoing(userId: string): Promise<FriendRequest[]> {
+    return this.requestRepo.find({
+      where: {
+        sender: { userId },
         status: FriendRequestStatus.PENDING,
       },
       order: { createdAt: 'DESC' },
@@ -142,13 +183,28 @@ export class FriendRequestService {
       );
     }
 
+    // Báo cho người gửi biết lời mời đã được chấp nhận.
+    await this.notificationService.createAndEmit({
+      userId: request.sender.userId,
+      type: 'friend_request',
+      title: 'Friend request accepted',
+      body: `${request.receiver.fullName} has accepted your friend request.`,
+      link: '/friends',
+      metadata: {
+        requestId: request.requestId,
+        senderId: request.sender.userId,
+        receiverId: request.receiver.userId,
+        status: request.status,
+      },
+    });
+
     return { success: true };
   }
 
   async declineRequest(requestId: string, userId: string) {
     const request = await this.requestRepo.findOne({
       where: { requestId },
-      relations: ['receiver'],
+      relations: ['sender', 'receiver'],
     });
 
     if (!request) {
@@ -166,6 +222,21 @@ export class FriendRequestService {
     request.status = FriendRequestStatus.DECLINED;
     request.respondedAt = new Date();
     await this.requestRepo.save(request);
+
+    // Báo cho người gửi biết lời mời đã bị từ chối.
+    await this.notificationService.createAndEmit({
+      userId: request.sender.userId,
+      type: 'friend_request',
+      title: 'Friend request declined',
+      body: `${request.receiver.fullName} has declined your friend request.`,
+      link: '/friends',
+      metadata: {
+        requestId: request.requestId,
+        senderId: request.sender.userId,
+        receiverId: request.receiver.userId,
+        status: request.status,
+      },
+    });
 
     return { success: true };
   }

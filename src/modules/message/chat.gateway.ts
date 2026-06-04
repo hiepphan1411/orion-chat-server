@@ -1,0 +1,1063 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  ConnectedSocket,
+  MessageBody,
+} from '@nestjs/websockets';
+import { Logger, Inject, ValidationPipe } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Server, Socket } from 'socket.io';
+import { ConfigService } from '@nestjs/config';
+import * as jwt from 'jsonwebtoken';
+import { Message, MessageDocument } from './message.schema';
+import { UsersService } from '../users/users.service';
+import { NotificationService } from '../notifications/notification.service';
+import {
+  Conversation,
+  ConversationType,
+} from '../conversation/entities/conversation.schema';
+import { GroupConversation } from '../conversation/entities/group-conversation.entity';
+import { ConversationParticipant } from '../conversation/entities/conversation-participant.entity';
+import {
+  JoinConversationSocketDto,
+  SendMessageSocketDto,
+  TypingSocketDto,
+} from './dto/chat-socket.dto';
+import { ChatMembershipService } from './services/chat-membership.service';
+
+const onlineUsers = new Map<string, string>();
+const socketAllowedOrigins = (
+  process.env.SOCKET_ALLOWED_ORIGINS ||
+  process.env.ALLOWED_ORIGINS ||
+  ''
+)
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const chatCorsOrigin =
+  socketAllowedOrigins.length === 0 || socketAllowedOrigins.includes('*')
+    ? true
+    : socketAllowedOrigins;
+
+@WebSocketGateway({
+  namespace: '/chat',
+  cors: {
+    origin: chatCorsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'X-Platform',
+      'ngrok-skip-browser-warning',
+    ],
+  },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 300000, // 5 minutes - increased from 1 minute
+  pingInterval: 60000, // ping every 1 minute - increased from 25 seconds
+})
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server!: Server;
+
+  private readonly logger = new Logger(ChatGateway.name);
+  private readonly validationPipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: false,
+  });
+
+  constructor(
+    @InjectModel(Message.name)
+    private readonly messageModel: Model<MessageDocument>,
+    private readonly configService: ConfigService,
+    @Inject(UsersService)
+    private readonly usersService: UsersService,
+    private readonly notificationService: NotificationService,
+    private readonly chatMembershipService: ChatMembershipService,
+    @InjectRepository(Conversation)
+    private readonly conversationRepo: Repository<Conversation>,
+    @InjectRepository(GroupConversation)
+    private readonly groupConversationRepo: Repository<GroupConversation>,
+    @InjectRepository(ConversationParticipant)
+    private readonly participantRepo: Repository<ConversationParticipant>,
+  ) {}
+
+  private emitToConversationRooms(
+    conversationId: string,
+    event: string,
+    payload: unknown,
+  ) {
+    // Support both legacy and plain room ids so FE can receive events regardless
+    // of which room naming convention it joined.
+    this.server
+      .to(`conversation:${conversationId}`)
+      .to(conversationId)
+      .emit(event, payload);
+  }
+
+  private async buildMemberPayload(userId: string) {
+    try {
+      const user = await this.usersService.getProfile(userId);
+      if (user?.data) {
+        return {
+          userId,
+          fullName: user.data.fullName || null,
+          avatarUrl: user.data.avatarUrl || null,
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        `[ChatGateway] Failed to load profile for ${userId}`,
+        error,
+      );
+    }
+
+    return {
+      userId,
+      fullName: null,
+      avatarUrl: null,
+    };
+  }
+
+  handleConnection(client: Socket) {
+    const userId = this.extractUserId(client);
+
+    if (!userId) {
+      this.logger.warn('No userId found in WebSocket connection');
+      client.disconnect(true);
+      return;
+    }
+
+    onlineUsers.set(userId, client.id);
+    void client.join(`user:${userId}`);
+    this.logger.log(`User ${userId} connected: ${client.id}`);
+
+    client.broadcast.emit('presence:user_online', {
+      userId,
+      at: new Date().toISOString(),
+    });
+  }
+
+  handleDisconnect(client: Socket) {
+    let disconnectedUserId: string | null = null;
+
+    for (const [userId, socketId] of onlineUsers.entries()) {
+      if (socketId === client.id) {
+        disconnectedUserId = userId;
+        onlineUsers.delete(userId);
+        break;
+      }
+    }
+
+    if (disconnectedUserId) {
+      this.logger.log(`User ${disconnectedUserId} disconnected`);
+      client.broadcast.emit('presence:user_offline', {
+        userId: disconnectedUserId,
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
+  // ==================== Emit methods ====================
+
+  /**
+   * Broadcast khi có ai đó react/unreact vào message
+   *
+   * @param payload
+   * messageId: ID của message bị react/unreact
+   * conversationId: ID của conversation chứa message đó
+   * reactions: Danh sách reactions mới nhất của message đó (sau khi đã được cập nhật)
+   * actedBy: userId của người vừa react/unreact
+   * action: 'set' nếu là react, 'remove' nếu là unreact
+   */
+  emitMessageReactionUpdated(payload: {
+    conversationId: string;
+    messageId: string;
+    reactions: Array<{ userId: string; emoji: string; reactedAt: Date }>;
+    actedBy: string;
+    action: 'set' | 'remove';
+    emoji?: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_reaction_updated', {
+        ...payload,
+        at: new Date().toISOString(),
+      });
+  }
+
+  /**
+   * Broadcast khi có ai đó recall (thu hồi) một message
+   *
+   * @param payload
+   * conversationId: ID của conversation chứa message đó
+   * messageId: ID của message bị recall
+   * revokedBy: userId của người vừa recall message đó
+   * revokedAt: timestamp khi message bị recall
+   * isRevoked: true nếu message đã bị recall, false nếu đã được un-recall (hoàn tác)
+   */
+  emitMessageRecalled(payload: {
+    conversationId: string;
+    messageId: string;
+    revokedBy: string;
+    revokedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_recalled', {
+        ...payload,
+        isRevoked: true,
+      });
+  }
+
+  emitMessageDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_deleted', {
+        ...payload,
+        isDeleted: true,
+        at: new Date().toISOString(),
+      });
+  }
+
+  emitMessageAdminDeleted(payload: {
+    conversationId: string;
+    messageId: string;
+    deletedBy: string;
+    deletedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_admin_deleted', {
+        ...payload,
+        deletedByAdmin: true,
+      });
+  }
+
+  emitGroupAdminTransferred(payload: {
+    groupId: string;
+    oldAdminUserId: string;
+    newAdminUserId: string;
+    transferredAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:admin_transferred', payload);
+  }
+
+  emitGroupMemberLeft(payload: {
+    groupId: string;
+    userId: string;
+    leftAt: string;
+    groupDeleted: boolean;
+    changeType?: 'leave' | 'kick';
+  }) {
+    this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+      type: payload.changeType || 'leave',
+      userId: payload.userId,
+      at: payload.leftAt,
+      groupDeleted: payload.groupDeleted,
+    });
+  }
+
+  emitGroupMembersAdded(payload: {
+    groupId: string;
+    addedBy: string;
+    userIds: string[];
+    addedAt: string;
+  }) {
+    void Promise.all(
+      payload.userIds.map(async (userId) => {
+        const user = await this.buildMemberPayload(userId);
+        this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+          type: 'join',
+          user,
+          addedBy: payload.addedBy,
+          at: payload.addedAt,
+        });
+      }),
+    );
+  }
+
+  emitGroupAutoDeleteUpdated(payload: {
+    groupId: string;
+    autoDeleteDuration: number;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:auto_delete_updated', payload);
+  }
+
+  emitGroupDissolved(payload: {
+    groupId: string;
+    dissolvedBy: string;
+    dissolvedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:dissolved', payload);
+  }
+
+  emitGroupJoinApprovalSettingUpdated(payload: {
+    groupId: string;
+    joinRequireApproval: boolean;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_approval_setting_updated', payload);
+  }
+
+  emitGroupJoinRequestCreated(payload: {
+    groupId: string;
+    requestId: string;
+    requesterId: string;
+    createdAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_request_created', payload);
+  }
+
+  emitGroupJoinRequestUpdated(payload: {
+    groupId: string;
+    requestId: string;
+    status: 'approved' | 'rejected';
+    actedBy: string;
+    actedAt: string;
+    requesterId: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:join_request_updated', payload);
+  }
+
+  emitGroupMemberJoined(payload: {
+    groupId: string;
+    userId: string;
+    joinedAt: string;
+  }) {
+    void this.buildMemberPayload(payload.userId).then((user) => {
+      this.emitToConversationRooms(payload.groupId, 'group:member_changed', {
+        type: 'join',
+        user,
+        at: payload.joinedAt,
+      });
+    });
+  }
+
+  emitGroupInfoUpdated(payload: {
+    groupId: string;
+    groupName?: string;
+    groupAvatar?: string;
+    updatedBy: string;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.groupId}`)
+      .emit('group:info_updated', payload);
+  }
+
+  emitConversationHiddenUpdated(payload: {
+    conversationId: string;
+    userId: string;
+    hidden: boolean;
+    updatedAt: string;
+  }) {
+    this.server
+      .to(`user:${payload.userId}`)
+      .emit('conversation:hidden_updated', {
+        conversationId: payload.conversationId,
+        userId: payload.userId,
+        hidden: payload.hidden,
+        updatedAt: payload.updatedAt,
+      });
+  }
+
+  emitConversationHistoryCleared(payload: {
+    conversationId: string;
+    userId: string;
+    deletedMessagesCount: number;
+    clearedAt: string;
+  }) {
+    this.server
+      .to(`user:${payload.userId}`)
+      .emit('conversation:history_cleared', {
+        conversationId: payload.conversationId,
+        userId: payload.userId,
+        deletedMessagesCount: payload.deletedMessagesCount,
+        clearedAt: payload.clearedAt,
+      });
+  }
+
+  emitConversationDeleted(payload: {
+    conversationId: string;
+    userId: string;
+    deletedAt: string;
+  }) {
+    this.server.to(`user:${payload.userId}`).emit('conversation:deleted', {
+      conversationId: payload.conversationId,
+      userId: payload.userId,
+      deletedAt: payload.deletedAt,
+    });
+  }
+
+  /**
+   * Emit khi tạo group mới - gửi tới tất cả thành viên để họ refresh conversations
+   */
+  emitGroupCreated(payload: {
+    groupId: string;
+    groupName: string;
+    createdBy: string;
+    memberIds: string[];
+  }) {
+    // Gửi tới tất cả thành viên trong group
+    for (const memberId of payload.memberIds) {
+      this.server.to(`user:${memberId}`).emit('group:created', {
+        groupId: payload.groupId,
+        groupName: payload.groupName,
+        createdBy: payload.createdBy,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  emitNewMessage(payload: {
+    conversationId: string;
+    messageId: string;
+    senderBy: string;
+    senderName?: string;
+    senderAvatar?: string;
+    content: string;
+    messageType?: string;
+    mediaUrl?: string; // ← THÊM: URL file/ảnh/video để bên B có thể preview ngay
+    fileName?: string; // ← THÊM: tên file gốc
+    fileSize?: number; // ← THÊM: kích thước file
+    mimeType?: string; // ← THÊM: MIME type (image/jpeg, video/mp4, ...)
+    createdAt: any;
+    clientMessageId?: string;
+    replyToMessageId?: string;
+    replyToMessagePreview?: {
+      messageId: string;
+      content: string;
+      senderName: string;
+      snippet: string;
+      createdAt: Date | string | null;
+    };
+    messageStatus?: string;
+    callData?: {
+      callType?: 'audio' | 'video';
+      callStatus?: 'completed' | 'missed' | 'declined';
+      duration?: number;
+      isInitiator?: boolean;
+      wasRejected?: boolean;
+    } | null;
+    mentions?: string[];
+    mentionAll?: boolean;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_new', {
+        conversationId: payload.conversationId,
+        message: {
+          _id: payload.messageId,
+          conversationId: payload.conversationId,
+          senderBy: payload.senderBy,
+          senderName: payload.senderName || payload.senderBy,
+          senderAvatar: payload.senderAvatar,
+          content: payload.content,
+          messageType: payload.messageType,
+          mediaUrl: payload.mediaUrl, // ← THÊM: broadcast URL cho bên nhận
+          fileName: payload.fileName, // ← THÊM
+          fileSize: payload.fileSize, // ← THÊM
+          mimeType: payload.mimeType, // ← THÊM
+          createdAt: payload.createdAt,
+          clientMessageId: payload.clientMessageId,
+          replyToMessageId: payload.replyToMessageId,
+          replyToMessagePreview: payload.replyToMessagePreview,
+          messageStatus: payload.messageStatus,
+          callData: payload.callData || null,
+          mentions: payload.mentions || [],
+          mentionAll: payload.mentionAll || false,
+        },
+      });
+  }
+
+  emitMessagePinned(payload: {
+    conversationId: string;
+    messageId: string;
+    pinnedBy: string;
+    pinnedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_pinned', payload);
+  }
+
+  emitMessageUnpinned(payload: {
+    conversationId: string;
+    messageId: string;
+    unpinnedBy: string;
+    unpinnedAt: string;
+  }) {
+    this.server
+      .to(`conversation:${payload.conversationId}`)
+      .emit('chat:message_unpinned', payload);
+  }
+
+  // Các @SubscribeMessage còn lại **giữ nguyên hoàn toàn** như code cũ của bạn
+  @SubscribeMessage('chat:join_conversation')
+  async handleJoinConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: JoinConversationSocketDto,
+  ) {
+    const requestId = String(rawData?.requestId || '');
+
+    try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: JoinConversationSocketDto,
+      })) as JoinConversationSocketDto;
+
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
+      // this.logger.log(
+      //   `[ChatGateway] Joining conversation: ${data.conversationId}`,
+      // );
+      void client.join(`conversation:${data.conversationId}`);
+      void client.join(data.conversationId);
+
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+      });
+    } catch (error) {
+      this.logger.error('Error joining conversation:', error);
+      return this.buildErrorAck(
+        requestId,
+        'JOIN_FAILED',
+        error instanceof Error ? error.message : 'Join failed',
+        true,
+      );
+    }
+  }
+
+  @SubscribeMessage('chat:leave_conversation')
+  async handleLeaveConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: JoinConversationSocketDto,
+  ) {
+    const requestId = String(rawData?.requestId || '');
+
+    try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: JoinConversationSocketDto,
+      })) as JoinConversationSocketDto;
+
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      void client.leave(`conversation:${data.conversationId}`);
+      void client.leave(data.conversationId);
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+      });
+    } catch (error) {
+      this.logger.error('Error leaving conversation:', error);
+      return this.buildErrorAck(
+        requestId,
+        'LEAVE_FAILED',
+        error instanceof Error ? error.message : 'Leave failed',
+        true,
+      );
+    }
+  }
+
+  @SubscribeMessage('chat:send_message')
+  async handleSendMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: SendMessageSocketDto,
+  ) {
+    const requestId = String(rawData?.requestId || '');
+    this.logger.log(`RECEIVED MESSAGE: ${JSON.stringify(rawData)}`);
+
+    try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: SendMessageSocketDto,
+      })) as SendMessageSocketDto;
+
+      this.logger.log(
+        `[ChatGateway] Sending message in conversation: ${data.conversationId}`,
+      );
+
+      const senderId = this.extractUserId(client);
+      if (!senderId) {
+        return this.buildErrorAck(
+          data.requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        senderId,
+        data.conversationId,
+      );
+
+      let replyToMessagePreview:
+        | {
+            messageId: string;
+            content: string;
+            senderName: string;
+            snippet: string;
+            createdAt: Date | string | null;
+          }
+        | undefined;
+
+      if (data.replyToMessageId) {
+        const replyMessage = await this.messageModel
+          .findOne({
+            _id: data.replyToMessageId,
+            conversationId: data.conversationId,
+            isDeleted: false,
+          })
+          .select('_id content senderBy createdAt')
+          .lean<{
+            _id: unknown;
+            content?: string;
+            senderBy: string;
+            createdAt?: Date | string;
+          } | null>()
+          .exec();
+
+        if (!replyMessage) {
+          return this.buildErrorAck(
+            data.requestId,
+            'REPLY_MESSAGE_NOT_FOUND',
+            'Reply target message not found in this conversation',
+            false,
+          );
+        }
+
+        let replySenderName = 'Unknown';
+        try {
+          const replySender = await this.usersService.getProfile(
+            replyMessage.senderBy,
+          );
+          if (replySender?.data?.fullName) {
+            replySenderName = replySender.data.fullName;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `[ChatGateway] Could not fetch reply sender info for ${replyMessage.senderBy}`,
+            error,
+          );
+        }
+
+        const replyContent = String(replyMessage.content || '');
+        replyToMessagePreview = {
+          messageId: String(replyMessage._id),
+          content: replyContent,
+          senderName: replySenderName,
+          snippet: replyContent.slice(0, 100),
+          createdAt: replyMessage.createdAt || null,
+        };
+      }
+
+      // Gửi notification cho tất cả thành viên còn lại trong conversation
+      // để hỗ trợ cả PRIVATE và GROUP chat.
+      const participants = await this.participantRepo.find({
+        where: { conversationId: data.conversationId },
+      });
+
+      const receiverIds = participants
+        .map((item) => item.userId)
+        .filter((userId) => userId && userId !== senderId);
+
+      // Parse mentions
+      const explicitMentions = Array.isArray(data.mentions) ? data.mentions : [];
+      const explicitMentionAll = typeof data.mentionAll === 'boolean' ? data.mentionAll : false;
+
+      const { mentions: parsedMentions, mentionAll: parsedMentionAll } = this.parseMentions(
+        data.content,
+        receiverIds,
+      );
+
+      const finalMentions = Array.from(
+        new Set([...explicitMentions, ...parsedMentions]),
+      ).filter((id) => id !== senderId);
+      const finalMentionAll = explicitMentionAll || parsedMentionAll;
+
+      // Create message in database
+      const message = await this.messageModel.create({
+        conversationId: data.conversationId,
+        senderBy: senderId,
+        content: data.content,
+        messageType: data.type?.toUpperCase() || 'TEXT',
+        mediaUrl: data.mediaUrl,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        mimeType: undefined,
+        replyToMessageId: data.replyToMessageId,
+        clientMessageId: data.clientMessageId,
+        messageStatus: 'SENT',
+        callData: data.callData || null,
+        mentions: finalMentions,
+        mentionAll: finalMentionAll,
+      });
+
+      this.logger.log(`[ChatGateway] Message created: ${String(message._id)}`);
+
+      // Fetch sender info to include in message emit
+      let senderName = senderId;
+      let senderAvatar: string | undefined;
+      try {
+        const user = await this.usersService.getProfile(senderId);
+        if (user?.data) {
+          senderName = user.data.fullName || senderId;
+          senderAvatar = user.data.avatarUrl;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `[ChatGateway] Could not fetch user info for ${senderId}:`,
+          err,
+        );
+        // Use senderId as fallback senderName
+      }
+
+      // FIX: Truyền đầy đủ mediaUrl, fileName, fileSize, mimeType, mentions, mentionAll vào emitNewMessage
+      // để bên B nhận được socket event với đủ thông tin preview media ngay lập tức
+      this.emitNewMessage({
+        conversationId: data.conversationId,
+        messageId: String(message._id),
+        senderBy: senderId,
+        senderName: senderName,
+        senderAvatar: senderAvatar,
+        content: data.content,
+        messageType: data.type,
+        mediaUrl: data.mediaUrl, // ← THÊM: URL đã upload từ FE gửi lên
+        fileName: data.fileName, // ← THÊM
+        fileSize: data.fileSize, // ← THÊM
+        mimeType: message.mimeType, // ← THÊM: lấy từ document vừa lưu vào DB
+        createdAt: message.createdAt,
+        clientMessageId: data.clientMessageId,
+        replyToMessageId: data.replyToMessageId,
+        replyToMessagePreview,
+        messageStatus: 'SENT',
+        callData: data.callData || null,
+        mentions: finalMentions,
+        mentionAll: finalMentionAll,
+      });
+
+      if (receiverIds.length > 0) {
+        const conversation = await this.conversationRepo.findOne({
+          where: { conversationId: data.conversationId },
+        });
+
+        const conversationType = conversation?.type || ConversationType.PRIVATE;
+
+        const groupInfo =
+          conversationType === ConversationType.GROUP
+            ? await this.groupConversationRepo.findOne({
+                where: { conversationId: data.conversationId },
+              })
+            : null;
+
+        const contentPreview =
+          data.type === 'text'
+            ? data.content
+            : data.type === 'call'
+              ? 'Ban co mot lich su cuoc goi moi'
+              : `Da gui ${data.type}`;
+
+        await Promise.allSettled(
+          receiverIds.map((receiverId) => {
+            const isTagged = finalMentionAll || finalMentions.includes(receiverId);
+
+            return this.notificationService.createAndEmit({
+              userId: receiverId,
+              type: data.type === 'call' ? 'call' : 'message',
+              title: senderName || '',
+              body: contentPreview,
+              link: '/chat',
+              metadata: {
+                conversationId: data.conversationId,
+                senderId,
+                senderName,
+                messageId: String(message._id),
+                messageType: data.type,
+                conversationType,
+                groupName: groupInfo?.groupName,
+                isTagged, // Sets the tag override flag so notification service handles mute bypass properly
+              },
+            });
+          }),
+        );
+      }
+
+      // ACK back to sender
+      return {
+        ok: true,
+        requestId: data.requestId,
+        data: {
+          messageId: String(message._id),
+          clientMessageId: data.clientMessageId,
+          timestamp: message.createdAt,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error sending message:', error);
+      return this.buildErrorAck(
+        requestId,
+        'SEND_FAILED',
+        error instanceof Error ? error.message : 'Send failed',
+        true,
+      );
+    }
+  }
+
+  @SubscribeMessage('chat:typing')
+  async handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() rawData: TypingSocketDto,
+  ) {
+    try {
+      const data = (await this.validationPipe.transform(rawData, {
+        type: 'body',
+        metatype: TypingSocketDto,
+      })) as TypingSocketDto;
+
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return;
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
+      this.server
+        .to(`conversation:${data.conversationId}`)
+        .emit('chat:typing', {
+          conversationId: data.conversationId,
+          userId,
+          isTyping: data.isTyping,
+          at: new Date().toISOString(),
+        });
+    } catch (error) {
+      this.logger.error('Error handling typing:', error);
+    }
+  }
+
+  @SubscribeMessage('chat:message_read')
+  async handleMessageRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      requestId: string;
+      conversationId: string;
+      messageId: string;
+    },
+  ) {
+    try {
+      const userId = this.extractUserId(client);
+      if (!userId) {
+        return this.buildErrorAck(
+          data?.requestId,
+          'UNAUTHORIZED',
+          'Invalid token',
+          false,
+        );
+      }
+
+      await this.chatMembershipService.assertConversationMember(
+        userId,
+        data.conversationId,
+      );
+
+      const seenAt = new Date();
+
+      await this.messageModel.updateOne(
+        { _id: data.messageId, conversationId: data.conversationId },
+        {
+          $pull: { seenBy: { userId } },
+        },
+      );
+
+      await this.messageModel.updateOne(
+        { _id: data.messageId, conversationId: data.conversationId },
+        {
+          $addToSet: {
+            seenBy: {
+              userId,
+              seenAt,
+            },
+          },
+        },
+      );
+
+      this.server
+        .to(`conversation:${data.conversationId}`)
+        .emit('chat:message_seen', {
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+          userId,
+          seenAt: seenAt.toISOString(),
+        });
+
+      return this.buildSuccessAck(data.requestId, {
+        conversationId: data.conversationId,
+        messageId: data.messageId,
+        seenAt: seenAt.toISOString(),
+      });
+    } catch (error) {
+      return this.buildErrorAck(
+        data?.requestId,
+        'READ_FAILED',
+        error instanceof Error ? error.message : 'Read status update failed',
+        true,
+      );
+    }
+  }
+
+  private parseMentions(
+    content: string,
+    allMembers: string[],
+  ): { mentions: string[]; mentionAll: boolean } {
+    const mentions: string[] = [];
+    let mentionAll = false;
+
+    if (!content) return { mentions, mentionAll };
+
+    // 1. Detect "@all" keywords with robust non-ASCII word boundary checking
+    const allKeywords = ['@all', '@everyone', '@tất cả', '@tất_cả'];
+    const lowerContent = content.toLowerCase();
+    mentionAll = allKeywords.some((kw) => {
+      const index = lowerContent.indexOf(kw);
+      if (index === -1) return false;
+
+      // Check preceding character boundary
+      if (index > 0) {
+        const charBefore = lowerContent[index - 1];
+        if (/\w/.test(charBefore)) return false;
+      }
+
+      // Check following character boundary
+      const afterIndex = index + kw.length;
+      if (afterIndex < lowerContent.length) {
+        const charAfter = lowerContent[afterIndex];
+        if (/[\w\d]/.test(charAfter)) return false;
+      }
+
+      return true;
+    });
+
+    // 2. Detect UUID mentions (e.g. @550e8400-e29b-41d4-a716-446655440000)
+    const uuidRegex =
+      /\B@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi;
+    let match;
+    while ((match = uuidRegex.exec(content)) !== null) {
+      const userId = match[1].toLowerCase();
+      if (allMembers.includes(userId) && !mentions.includes(userId)) {
+        mentions.push(userId);
+      }
+    }
+
+    return { mentions, mentionAll };
+  }
+
+  private extractUserId(client: Socket): string | null {
+    const token =
+      (client.handshake.auth?.token as string) ||
+      (client.handshake.query.token as string) ||
+      (client.handshake.auth?.userId as string) ||
+      (client.handshake.query.userId as string);
+
+    if (!token) {
+      return null;
+    }
+
+    if (!token.includes('.')) {
+      return token;
+    }
+
+    try {
+      const secret =
+        this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
+      const decoded = jwt.verify(token, secret) as {
+        sub?: string;
+        userId?: string;
+        phoneNumber?: string;
+      };
+
+      return decoded.sub || decoded.userId || decoded.phoneNumber || null;
+    } catch (error) {
+      this.logger.warn(`Invalid JWT token: ${error}`);
+      return null;
+    }
+  }
+
+  private buildSuccessAck(requestId: string, data: unknown) {
+    return {
+      ok: true,
+      requestId,
+      data,
+    };
+  }
+
+  private buildErrorAck(
+    requestId: string | undefined,
+    code: string,
+    message: string,
+    retriable: boolean,
+  ) {
+    return {
+      ok: false,
+      requestId,
+      error: {
+        code,
+        message,
+        retriable,
+      },
+    };
+  }
+}

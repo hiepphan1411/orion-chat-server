@@ -1,0 +1,379 @@
+name: Backend CI/CD to EC2
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      reset_local_database_once:
+        description: 'Set true one time only to recreate local Postgres/Mongo volumes with new credentials'
+        required: false
+        default: 'false'
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/orion-chat-backend
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: npm run build
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+
+  deploy-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate required secrets
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_KEY_B64: ${{ secrets.EC2_SSH_KEY_B64 }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          ESMS_API_KEY: ${{ secrets.ESMS_API_KEY }}
+          ESMS_SECRET_KEY: ${{ secrets.ESMS_SECRET_KEY }}
+        run: |
+          set -e
+          required=(
+            DOCKER_USERNAME
+            DOCKER_PASSWORD
+            EC2_HOST
+            EC2_USER
+            POSTGRES_DB
+            POSTGRES_USER
+            POSTGRES_PASSWORD
+            MONGO_USER
+            MONGO_PASSWORD
+            JWT_SECRET
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            AWS_S3_BUCKET
+            ESMS_API_KEY
+            ESMS_SECRET_KEY
+          )
+
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "Missing secret: $name"
+              exit 1
+            fi
+          done
+
+          if [ -z "$EC2_SSH_KEY" ] && [ -z "$EC2_SSH_KEY_B64" ]; then
+            echo "Missing secret: EC2_SSH_KEY or EC2_SSH_KEY_B64"
+            exit 1
+          fi
+
+      - name: Render production env file
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          MONGO_DB: ${{ vars.MONGO_DB || 'orion_chat' }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN || '30d' }}
+          TYPEORM_SYNC: ${{ vars.TYPEORM_SYNC || 'false' }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          WEB_BASE_URL: ${{ vars.WEB_BASE_URL }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          SOCKET_ALLOWED_ORIGINS: ${{ vars.SOCKET_ALLOWED_ORIGINS }}
+          ONLYOFFICE_DOCUMENT_SERVER_URL: ${{ vars.ONLYOFFICE_DOCUMENT_SERVER_URL }}
+          ONLYOFFICE_CALLBACK_BASE_URL: ${{ vars.ONLYOFFICE_CALLBACK_BASE_URL }}
+          ONLYOFFICE_CALLBACK_SECRET: ${{ secrets.ONLYOFFICE_CALLBACK_SECRET }}
+          ONLYOFFICE_JWT_ENABLED: ${{ vars.ONLYOFFICE_JWT_ENABLED || 'false' }}
+          ONLYOFFICE_JWT_SECRET: ${{ secrets.ONLYOFFICE_JWT_SECRET }}
+          STREAM_API_KEY: ${{ secrets.STREAM_API_KEY }}
+          STREAM_SECRET_KEY: ${{ secrets.STREAM_SECRET_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_S3_PUBLIC_BASE_URL: ${{ vars.AWS_S3_PUBLIC_BASE_URL }}
+          AWS_S3_ENDPOINT: ${{ vars.AWS_S3_ENDPOINT }}
+          AWS_S3_FORCE_PATH_STYLE: ${{ vars.AWS_S3_FORCE_PATH_STYLE || 'false' }}
+          ESMS_API_KEY: ${{ secrets.ESMS_API_KEY }}
+          ESMS_SECRET_KEY: ${{ secrets.ESMS_SECRET_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gemini' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-flash-latest' }}
+          OLLAMA_API_URL: ${{ vars.OLLAMA_API_URL }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL }}
+        run: |
+          set -e
+          node <<'NODE' > .env.production
+          const mongoUser = must('MONGO_USER');
+          const mongoPassword = must('MONGO_PASSWORD');
+          const mongoDb = optional('MONGO_DB', 'orion_chat');
+          const mongoUri = `mongodb://${encodeURIComponent(mongoUser)}:${encodeURIComponent(mongoPassword)}@mongodb:27017/${mongoDb}?authSource=admin`;
+
+          const ec2Host = optional('EC2_HOST');
+          const defaultPublicBaseUrl = ec2Host
+            ? `http://${ec2Host.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+            : 'http://localhost:3000';
+          const appBaseUrl = cleanPublicUrl(optional('APP_BASE_URL')) || defaultPublicBaseUrl;
+          const webBaseUrl = cleanPublicUrl(optional('WEB_BASE_URL')) || appBaseUrl;
+          const allowedOrigins = optional('ALLOWED_ORIGINS', webBaseUrl);
+          const socketAllowedOrigins = optional('SOCKET_ALLOWED_ORIGINS', allowedOrigins);
+          const onlyOfficeUrl =
+            cleanPublicUrl(optional('ONLYOFFICE_DOCUMENT_SERVER_URL')) ||
+            `${appBaseUrl.replace(/\/+$/, '')}/onlyoffice`;
+          const onlyOfficeCallbackBaseUrl =
+            cleanPublicUrl(optional('ONLYOFFICE_CALLBACK_BASE_URL')) || appBaseUrl;
+
+          const values = {
+            NODE_ENV: 'production',
+            PORT: '3000',
+            TYPEORM_SYNC: optional('TYPEORM_SYNC', 'false'),
+            JWT_SECRET: must('JWT_SECRET'),
+            JWT_EXPIRES_IN: optional('JWT_EXPIRES_IN', '30d'),
+            APP_BASE_URL: appBaseUrl,
+            WEB_BASE_URL: webBaseUrl,
+            ALLOWED_ORIGINS: allowedOrigins,
+            SOCKET_ALLOWED_ORIGINS: socketAllowedOrigins,
+            DB_HOST: 'postgres',
+            DB_PORT: '5432',
+            DB_USER: must('POSTGRES_USER'),
+            DB_PASSWORD: must('POSTGRES_PASSWORD'),
+            DB_NAME: must('POSTGRES_DB'),
+            MONGO_URI: mongoUri,
+            MONGO_INITDB_ROOT_USERNAME: mongoUser,
+            MONGO_INITDB_ROOT_PASSWORD: mongoPassword,
+            REDIS_HOST: 'redis',
+            REDIS_PORT: '6379',
+            REDIS_URL: 'redis://redis:6379',
+            ONLYOFFICE_DOCUMENT_SERVER_URL: onlyOfficeUrl,
+            ONLYOFFICE_CALLBACK_BASE_URL: onlyOfficeCallbackBaseUrl,
+            ONLYOFFICE_CALLBACK_SECRET: optional(
+              'ONLYOFFICE_CALLBACK_SECRET',
+              must('JWT_SECRET'),
+            ),
+            ONLYOFFICE_JWT_ENABLED: optional('ONLYOFFICE_JWT_ENABLED', 'false'),
+            ONLYOFFICE_JWT_SECRET: optional('ONLYOFFICE_JWT_SECRET'),
+            STREAM_API_KEY: optional('STREAM_API_KEY'),
+            STREAM_SECRET_KEY: optional('STREAM_SECRET_KEY'),
+            AWS_REGION: optional('AWS_REGION', 'ap-southeast-1'),
+            AWS_ACCESS_KEY_ID: must('AWS_ACCESS_KEY_ID'),
+            AWS_SECRET_ACCESS_KEY: must('AWS_SECRET_ACCESS_KEY'),
+            AWS_S3_BUCKET: must('AWS_S3_BUCKET'),
+            AWS_S3_PUBLIC_BASE_URL: optional('AWS_S3_PUBLIC_BASE_URL'),
+            AWS_S3_ENDPOINT: optional('AWS_S3_ENDPOINT'),
+            AWS_S3_FORCE_PATH_STYLE: optional('AWS_S3_FORCE_PATH_STYLE', 'false'),
+            ESMS_API_KEY: must('ESMS_API_KEY'),
+            ESMS_SECRET_KEY: must('ESMS_SECRET_KEY'),
+            AI_PROVIDER: optional('AI_PROVIDER', 'gemini'),
+            GEMINI_API_KEY: optional('GEMINI_API_KEY'),
+            GEMINI_API_KEYS: optional('GEMINI_API_KEYS'),
+            GEMINI_MODEL: optional('GEMINI_MODEL', 'gemini-flash-latest'),
+            OLLAMA_API_URL: optional('OLLAMA_API_URL'),
+            OLLAMA_MODEL: optional('OLLAMA_MODEL'),
+          };
+
+          for (const [key, value] of Object.entries(values)) {
+            process.stdout.write(`${key}=${formatEnvValue(value)}\n`);
+          }
+
+          function must(name) {
+            const value = optional(name);
+            if (!value) throw new Error(`Missing environment value: ${name}`);
+            return value;
+          }
+
+          function optional(name, fallback = '') {
+            return process.env[name] || fallback;
+          }
+
+          function cleanPublicUrl(value) {
+            const normalized = String(value || '').trim().replace(/\/+$/, '');
+            if (!normalized) return '';
+            if (normalized.includes('your-domain.com')) return '';
+            if (normalized.includes('your-frontend-domain.com')) return '';
+            return normalized;
+          }
+
+          function formatEnvValue(value) {
+            const normalized = String(value ?? '').replace(/\r?\n/g, '');
+            if (/^[A-Za-z0-9_./:@%+=,-]*$/.test(normalized)) return normalized;
+            return JSON.stringify(normalized);
+          }
+          NODE
+
+      - name: Prepare SSH private key file
+        run: |
+          set -e
+          if [ -n "${{ secrets.EC2_SSH_KEY_B64 }}" ]; then
+            echo "Using EC2_SSH_KEY_B64"
+            echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > ./.ec2_key.pem
+          else
+            echo "Using EC2_SSH_KEY"
+            printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > ./.ec2_key.pem
+          fi
+
+          # Normalize line endings to avoid key auth failures from CRLF secrets.
+          tr -d '\r' < ./.ec2_key.pem > ./.ec2_key.normalized.pem
+          mv ./.ec2_key.normalized.pem ./.ec2_key.pem
+
+          chmod 600 ./.ec2_key.pem
+          ssh-keygen -y -f ./.ec2_key.pem > /dev/null
+          echo "Loaded SSH key fingerprint: $(ssh-keygen -lf ./.ec2_key.pem | awk '{print $2, $4}')"
+
+          {
+            echo "EC2_SSH_KEY_DECODED<<EOF"
+            cat ./.ec2_key.pem
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Preflight SSH authentication
+        run: |
+          set -e
+          SSH_PORT="${{ secrets.EC2_PORT }}"
+          if [ -z "$SSH_PORT" ]; then
+            SSH_PORT="22"
+          fi
+
+          ssh -i ./.ec2_key.pem \
+            -o StrictHostKeyChecking=no \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -o ConnectTimeout=15 \
+            -p "$SSH_PORT" \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "echo '[OK] SSH auth success'"
+
+      - name: Upload deploy files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ env.EC2_SSH_KEY_DECODED }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          source: 'docker-compose.backend.yml,.env.production,deploy/nginx/orion-backend.conf'
+          target: '~/orion-chat-backend'
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          RESET_LOCAL_DATABASE_ONCE: ${{ github.event.inputs.reset_local_database_once || vars.RESET_LOCAL_DATABASE_ONCE || 'false' }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ env.EC2_SSH_KEY_DECODED }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          envs: IMAGE_TAG,DOCKER_USERNAME,DOCKER_PASSWORD,RESET_LOCAL_DATABASE_ONCE
+          script: |
+            set -e
+            cd ~/orion-chat-backend
+
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+            export DOCKER_IMAGE="$DOCKER_USERNAME/orion-chat-backend:$IMAGE_TAG"
+            docker compose -f docker-compose.backend.yml --env-file .env.production pull backend postgres mongodb redis onlyoffice
+
+            echo "[INFO] Effective database hosts from .env.production:"
+            grep -E '^(DB_HOST|DB_PORT|DB_NAME|DB_USER|REDIS_URL)=' .env.production || true
+            echo "[INFO] Effective public/socket/OnlyOffice URLs from .env.production:"
+            grep -E '^(APP_BASE_URL|WEB_BASE_URL|ALLOWED_ORIGINS|SOCKET_ALLOWED_ORIGINS|ONLYOFFICE_DOCUMENT_SERVER_URL|ONLYOFFICE_CALLBACK_BASE_URL)=' .env.production || true
+            grep -E '^MONGO_URI=.*@mongodb(:|/)' .env.production >/dev/null \
+              && echo "MONGO_URI=local mongodb container" \
+              || echo "MONGO_URI=not local mongodb container"
+
+            if [ "$RESET_LOCAL_DATABASE_ONCE" = "true" ]; then
+              echo "[RESET] RESET_LOCAL_DATABASE_ONCE=true. Recreating local Postgres/Mongo data volumes once."
+              docker compose -f docker-compose.backend.yml --env-file .env.production stop backend postgres mongodb || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production rm -f backend postgres mongodb || true
+              docker volume rm orion-chat-backend_postgres_data orion-chat-backend_mongo_data || true
+              echo "[RESET] Done. Set RESET_LOCAL_DATABASE_ONCE back to false/remove it after this run."
+            fi
+
+            # Start data services first so failures are easier to diagnose.
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d postgres mongodb redis onlyoffice || true
+
+            if ! docker compose -f docker-compose.backend.yml --env-file .env.production up -d --remove-orphans; then
+              echo "[DIAG] docker compose up failed. Printing status and recent logs..."
+              docker compose -f docker-compose.backend.yml --env-file .env.production ps || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 postgres || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 mongodb || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 redis || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 onlyoffice || true
+              docker compose -f docker-compose.backend.yml --env-file .env.production logs --tail=200 backend || true
+              exit 1
+            fi
+
+            docker compose -f docker-compose.backend.yml --env-file .env.production up -d --force-recreate --no-deps backend
+
+            if command -v nginx >/dev/null 2>&1 && [ -f deploy/nginx/orion-backend.conf ]; then
+              if sudo -n true 2>/dev/null; then
+                sudo install -m 0644 deploy/nginx/orion-backend.conf /etc/nginx/sites-available/orion-backend
+                if [ ! -e /etc/nginx/sites-enabled/orion-backend ]; then
+                  sudo ln -s /etc/nginx/sites-available/orion-backend /etc/nginx/sites-enabled/orion-backend
+                fi
+                sudo rm -f /etc/nginx/sites-enabled/default
+                sudo nginx -t
+                sudo systemctl reload nginx
+              else
+                echo "[WARN] Nginx config uploaded, but passwordless sudo is not available. Apply deploy/nginx/orion-backend.conf manually."
+              fi
+            fi
+
+            docker image prune -f
+
+            echo "Deploy success with image: $DOCKER_IMAGE"
+
+      - name: Cleanup SSH key file
+        if: always()
+        run: rm -f ./.ec2_key.pem ./.env.production

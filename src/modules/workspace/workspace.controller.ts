@@ -13,6 +13,8 @@ import { WorkspaceService } from './workspace.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import type { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 
 @Controller('workspaces')
 @UseGuards(JwtAuthGuard)
@@ -40,8 +42,17 @@ export class WorkspaceController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.workspaceService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.workspaceService.remove(id, user.userId);
+  }
+
+  @Patch(':id/transfer-owner/:targetUserId')
+  transferOwner(
+    @Param('id') id: string,
+    @Param('targetUserId') targetUserId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.workspaceService.transferOwner(id, targetUserId, user.userId);
   }
 
   @Get(':id/workload')
@@ -49,8 +60,18 @@ export class WorkspaceController {
     return this.workspaceService.getWorkload(id);
   }
 
+  @Get(':id/dashboard-stats')
+  getDashboardStats(@Param('id') id: string) {
+    return this.workspaceService.getDashboardStats(id);
+  }
+
   @Get(':id/reports')
   getReports(@Param('id') id: string) {
     return this.workspaceService.getReports(id);
+  }
+
+  @Post(':id/invite-link')
+  generateInviteLink(@Param('id') id: string) {
+    return this.workspaceService.generateInviteLink(id);
   }
 }

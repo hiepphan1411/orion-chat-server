@@ -9,6 +9,8 @@ import { Label } from '../label/entities/label.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto, MoveTaskDto } from './dto/update-task.dto';
+import { NotificationService } from '../notifications/notification.service';
+import { Workspace } from '../workspace/entities/workspace.entity';
 
 @Injectable()
 export class TaskService {
@@ -25,6 +27,9 @@ export class TaskService {
     private labelRepo: Repository<Label>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(Workspace)
+    private workspaceRepo: Repository<Workspace>,
+    private notificationService: NotificationService,
   ) {}
 
   // Quan hệ
@@ -53,7 +58,10 @@ export class TaskService {
   ];
 
   async create(boardId: string, dto: CreateTaskDto) {
-    const board = await this.boardRepo.findOne({ where: { boardId } });
+    const board = await this.boardRepo.findOne({
+      where: { boardId },
+      relations: ['workspace'],
+    });
     if (!board) throw new NotFoundException('Board not found');
 
     const createdBy = await this.userRepo.findOne({
@@ -64,8 +72,9 @@ export class TaskService {
     let column: BoardColumn | null = null;
     if (dto.columnId) {
       column = await this.columnRepo.findOne({
-        where: { columnId: dto.columnId },
+        where: { columnId: dto.columnId, board: { boardId } },
       });
+      if (!column) throw new NotFoundException('Column not found in this board');
     }
 
     let order = 0;
@@ -85,11 +94,11 @@ export class TaskService {
 
     const task = this.taskRepo.create({
       title: dto.title,
-      description: dto.description,
+      description: dto.description as string,
       priority: dto.priority,
       status: dto.status,
-      startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+      startDate: dto.startDate ? new Date(dto.startDate) : (null as any),
+      dueDate: dto.dueDate ? new Date(dto.dueDate) : (null as any),
       order,
       board,
       column,
@@ -102,8 +111,26 @@ export class TaskService {
       for (const userId of dto.assigneeIds) {
         const user = await this.userRepo.findOne({ where: { userId } });
         if (user) {
-          const assignee = this.assigneeRepo.create({ task: saved, user });
+          const assignee = this.assigneeRepo.create({ task: saved as any, user });
           await this.assigneeRepo.save(assignee);
+
+          // Send notification to the assigned user
+          const taskTitle = (saved as any)?.title || 'Task';
+          const taskId = (saved as any)?.taskId || '';
+          const workspaceId = board.workspace?.workspaceId || 'unknown';
+          await this.notificationService.createAndEmit({
+            userId,
+            type: 'system',
+            title: 'Task Assignment',
+            body: `You were assigned to task: "${taskTitle}"`,
+            link: `/work-hub/${workspaceId}/boards/${boardId}?task=${taskId}`,
+            metadata: {
+              taskId,
+              taskTitle,
+              boardId,
+              workspaceId,
+            },
+          });
         }
       }
     }
@@ -131,11 +158,24 @@ export class TaskService {
       relations: this.detailRelations,
     });
     if (!task) throw new NotFoundException('Task not found');
+    
+    // Ensure arrays are initialized
+    if (!task.assignees) task.assignees = [];
+    if (!task.labels) task.labels = [];
+    if (!task.subtasks) task.subtasks = [];
+    if (!task.comments) task.comments = [];
+    if (!task.attachments) task.attachments = [];
+    if (!task.activityLogs) task.activityLogs = [];
+    
     return task;
   }
 
   async update(id: string, dto: UpdateTaskDto) {
     const task = await this.findOne(id);
+    const board = await this.boardRepo.findOne({
+      where: { boardId: task.board.boardId },
+      relations: ['workspace'],
+    });
 
     if (dto.labelIds) {
       task.labels = await this.labelRepo.find({
@@ -144,12 +184,43 @@ export class TaskService {
     }
 
     if (dto.assigneeIds) {
+      // Get current assignee IDs
+      const currentAssignees = await this.assigneeRepo.find({
+        where: { task: { taskId: id } },
+        relations: ['user'],
+      });
+      const currentUserIds = currentAssignees.map((a) => a.user.userId);
+
+      // Find new assignees
+      const newUserIds = dto.assigneeIds.filter((uid) => !currentUserIds.includes(uid));
+
+      // Delete old assignees
       await this.assigneeRepo.delete({ task: { taskId: id } });
+
+      // Add new assignees and send notifications
       for (const userId of dto.assigneeIds) {
         const user = await this.userRepo.findOne({ where: { userId } });
         if (user) {
           const assignee = this.assigneeRepo.create({ task, user });
           await this.assigneeRepo.save(assignee);
+
+          // Send notification only to newly assigned users
+          if (newUserIds.includes(userId)) {
+            const workspaceId = board?.workspace?.workspaceId || 'unknown';
+            await this.notificationService.createAndEmit({
+              userId,
+              type: 'system',
+              title: 'Task Assignment',
+              body: `You were assigned to task: "${task.title}"`,
+              link: `/work-hub/${workspaceId}/boards/${task.board.boardId}?task=${task.taskId}`,
+              metadata: {
+                taskId: task.taskId,
+                taskTitle: task.title,
+                boardId: task.board.boardId,
+                workspaceId,
+              },
+            });
+          }
         }
       }
     }

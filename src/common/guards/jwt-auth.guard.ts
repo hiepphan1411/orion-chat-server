@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +29,8 @@ interface AuthenticatedRequest extends Request {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(
     private configService: ConfigService,
 
@@ -44,12 +47,10 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     try {
-      // Verify JWT token using manual crypto (matches auth.service generation)
       const secret =
         this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
       const payload = this.verifyToken(token, secret);
 
-      // Kiểm tra user tồn tại bằng phoneNumber
       const user = await this.userRepository.findOne({
         where: { phoneNumber: payload.phoneNumber },
       });
@@ -58,7 +59,55 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('User not found');
       }
 
-      // Attach user vào request
+      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB
+      const platform = (request.headers['x-platform'] as string) || 'web';
+      const tokenMatchesWeb = user.webSessionToken === token;
+      const tokenMatchesMobile = user.mobileSessionToken === token;
+
+      // this.logger.log(
+      //   '[JWT Guard] Platform: ' +
+      //     platform +
+      //     ' | Web match: ' +
+      //     tokenMatchesWeb +
+      //     ' | Mobile match: ' +
+      //     tokenMatchesMobile,
+      // );
+
+      // Kiểm tra token phải khớp với session trong DB
+      if (!tokenMatchesWeb && !tokenMatchesMobile) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token không khớp bất kỳ session nào',
+        );
+        throw new UnauthorizedException(
+          'Phiên làm việc đã hết hạn hoặc bạn đã đăng nhập ở nơi khác',
+        );
+      }
+
+      // Kiểm tra platform-specific session
+      if (platform === 'web' && !tokenMatchesWeb) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token web không khớp (có thể đã login ở browser khác)',
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị web khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
+      if (platform === 'mobile' && !tokenMatchesMobile) {
+        this.logger.warn(
+          '[Session Mismatch] User ' +
+            payload.phoneNumber +
+            ' - token mobile không khớp (có thể đã login ở mobile khác)',
+        );
+        throw new UnauthorizedException(
+          'Bạn đã đăng nhập ở thiết bị mobile khác. Phiên hiện tại đã hết hạn.',
+        );
+      }
+
       request.user = {
         userId: user.userId,
         phoneNumber: user.phoneNumber,
@@ -89,7 +138,11 @@ export class JwtAuthGuard implements CanActivate {
     const expectedSignature = crypto
       .createHmac('sha256', secret)
       .update(`${headerB64}.${payloadB64}`)
-      .digest('base64');
+      // .digest('base64')
+      // .replace(/\+/g, '-')
+      // .replace(/\//g, '_')
+      // .replace(/=+$/g, '');
+      .digest('base64url');
 
     // Verify signature
     if (signatureB64 !== expectedSignature) {
@@ -97,7 +150,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // Decode and parse payload
-    const payloadJson = Buffer.from(payloadB64, 'base64').toString('utf-8');
+    const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
     const payload = JSON.parse(payloadJson) as JwtPayload;
 
     // Check expiry

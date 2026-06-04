@@ -9,13 +9,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import type { Request } from 'express';
-import {
-  SESSION_TIMEOUT,
-  isSessionExpired,
-} from '../../../config/session.config';
 
 interface TokenPayload {
   phoneNumber: string;
+  userId?: string;
+  deviceType?: string;
   iat: number;
   exp: number;
 }
@@ -40,10 +38,10 @@ export class JwtSessionGuard implements CanActivate {
     }
 
     try {
-      //trích xuất số điện thoại từ token
-      const phoneNumber = this.extractPhoneFromToken(token);
+      const tokenPayload = this.extractTokenPayload(token);
+      const phoneNumber = tokenPayload.phoneNumber;
 
-      // Find user
+      // Tìm user
       const user = await this.userRepo.findOne({
         where: { phoneNumber },
       });
@@ -52,42 +50,58 @@ export class JwtSessionGuard implements CanActivate {
         throw new UnauthorizedException('Người dùng không tồn tại');
       }
 
-      // Check if user is active
+      // Kiểm tra trạng thái tài khoản
       if (!user.isActive) {
         throw new UnauthorizedException('Tài khoản đã bị vô hiệu hóa');
       }
 
-      // Single Session Login
+      // Kiểm tra Session Mismatch - Token phải khớp với token lưu trong DB.
+      // Ưu tiên x-platform header, fallback theo deviceType trong JWT để tránh
+      // trường hợp client quên gửi header và bị mặc định sai sang web.
+      const headerPlatform = this.normalizePlatform(
+        request.headers['x-platform'],
+      );
+      const tokenPlatform = this.normalizePlatform(tokenPayload.deviceType);
+      const tokenMatchesWeb = user.webSessionToken === token;
+      const tokenMatchesMobile = user.mobileSessionToken === token;
 
-      if (user.currentSessionToken !== token) {
+      const platform =
+        headerPlatform ||
+        tokenPlatform ||
+        (tokenMatchesMobile && !tokenMatchesWeb
+          ? 'mobile'
+          : tokenMatchesWeb && !tokenMatchesMobile
+            ? 'web'
+            : 'web');
+
+      // this.logger.debug('[Session Check] Platform from header: ' + platform);
+      // this.logger.debug(
+      //   '[Session Check] Token matches web: ' + tokenMatchesWeb,
+      // );
+      // this.logger.debug(
+      //   '[Session Check] Token matches mobile: ' + tokenMatchesMobile,
+      // );
+
+      // Kiểm tra token chỉ match với platform của request
+      if (platform === 'web' && !tokenMatchesWeb) {
         this.logger.warn(
-          `Session expired for user ${phoneNumber}. Token mismatch detected. User logged in elsewhere.`,
+          `[Session Mismatch] User ${phoneNumber} web token mismatch. Old token detected.`,
         );
         throw new UnauthorizedException(
-          'Phiên làm việc đã hết hạn. Bạn đã đăng nhập ở nơi khác.',
+          'Bạn đã đăng nhập ở thiết bị web khác. Phiên hiện tại đã hết hạn.',
         );
       }
 
-      // Session Timeout kiểm tra nếu không có hoạt động
-
-      if (isSessionExpired(user.lastActivityAt, SESSION_TIMEOUT.DEFAULT)) {
+      if (platform === 'mobile' && !tokenMatchesMobile) {
         this.logger.warn(
-          `Session timeout for user ${phoneNumber}. No activity for more than 15 minutes.`,
+          `[Session Mismatch] User ${phoneNumber} mobile token mismatch. Old token detected.`,
         );
-        // xóa token phiên làm việc
-        user.currentSessionToken = null as unknown as string;
-        await this.userRepo.save(user);
-
         throw new UnauthorizedException(
-          'Phiên làm việc đã hết hạn do không hoạt động.',
+          'Bạn đã đăng nhập ở thiết bị mobile khác. Phiên hiện tại đã hết hạn.',
         );
       }
 
-      // Update last activity time
-      user.lastActivityAt = Date.now();
-      await this.userRepo.save(user);
-
-      // Attach user info to request
+      // Gán thông tin người dùng vào request
       request.user = {
         phoneNumber: user.phoneNumber,
         userId: user.userId,
@@ -111,7 +125,7 @@ export class JwtSessionGuard implements CanActivate {
     return type === 'Bearer' ? token : undefined;
   }
 
-  private extractPhoneFromToken(token: string): string {
+  private extractTokenPayload(token: string): TokenPayload {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) {
@@ -121,9 +135,27 @@ export class JwtSessionGuard implements CanActivate {
       const payload = JSON.parse(
         Buffer.from(parts[1], 'base64').toString('utf-8'),
       ) as TokenPayload;
-      return payload.phoneNumber;
-    } catch {
+
+      if (!payload.phoneNumber) {
+        throw new Error('phoneNumber not found in token');
+      }
+
+      return payload;
+    } catch (error) {
+      this.logger.error('Error extracting phone from token:', error);
       throw new UnauthorizedException('Token không hợp lệ');
     }
+  }
+
+  private normalizePlatform(
+    value: string | string[] | undefined,
+  ): 'web' | 'mobile' | null {
+    if (!value) return null;
+    const raw = Array.isArray(value) ? value[0] : value;
+    const normalized = raw?.toLowerCase();
+    if (normalized === 'web' || normalized === 'mobile') {
+      return normalized;
+    }
+    return null;
   }
 }

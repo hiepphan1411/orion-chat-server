@@ -1,0 +1,108 @@
+services:
+  backend:
+    image: ${DOCKER_IMAGE}
+    container_name: orion_backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      MONGO_URI: ${MONGO_URI}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '8080:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      onlyoffice:
+        condition: service_started
+    volumes:
+      - backend_uploads:/app/uploads
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: orion_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h localhost -p 5432 -U ${DB_USER} -d ${DB_NAME}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:7
+    container_name: orion_mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "echo 'db.adminCommand({ ping: 1 }).ok' | mongosh mongodb://$$MONGO_INITDB_ROOT_USERNAME:$$MONGO_INITDB_ROOT_PASSWORD@localhost:27017/admin --quiet",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: orion_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - redis_data:/data
+
+  onlyoffice:
+    image: onlyoffice/documentserver:8.3
+    container_name: orion_onlyoffice
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: ${ONLYOFFICE_JWT_ENABLED:-false}
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+    ports:
+      - '127.0.0.1:8088:80'
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_lib:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+
+volumes:
+  backend_uploads:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  onlyoffice_data:
+  onlyoffice_logs:
+  onlyoffice_lib:
+  onlyoffice_db:

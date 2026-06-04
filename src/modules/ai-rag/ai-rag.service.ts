@@ -3,27 +3,12 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { Model } from 'mongoose';
+import { OllamaAiService } from 'src/common/services/ollama-ai.service';
 import { AIRagDocument, AIRagDocumentDocument } from './ai-rag-document.schema';
 import { AIRagChunk, AIRagChunkDocument } from './ai-rag.schema';
-
-interface GeminiEmbeddingResponse {
-  embedding?: {
-    values?: number[];
-  };
-}
-
-interface HttpErrorLike {
-  response?: {
-    status?: number;
-    data?: unknown;
-  };
-  message?: string;
-}
 
 export interface RagChunkScore {
   documentId: string;
@@ -82,7 +67,7 @@ export class AIRagService {
     private readonly ragDocumentModel: Model<AIRagDocumentDocument>,
     @InjectModel(AIRagChunk.name)
     private readonly ragChunkModel: Model<AIRagChunkDocument>,
-    private readonly configService: ConfigService,
+    private readonly ollamaAiService: OllamaAiService,
   ) {}
 
   async ingestDocument(
@@ -527,7 +512,7 @@ export class AIRagService {
       throw new BadRequestException('samples is required');
     }
 
-    const model = body.model || 'gemini-2.5-flash';
+    const model = body.model || 'qwen2.5:7b';
     const topK = Math.max(1, Math.min(body.topK || 4, 10));
 
     const variantResults: PromptVariantScore[] = [];
@@ -736,13 +721,6 @@ export class AIRagService {
     systemPrompt: string,
     chunks: RagChunkScore[],
   ): Promise<string> {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-    if (!apiKey) {
-      throw new InternalServerErrorException(
-        'Missing GEMINI_API_KEY on server',
-      );
-    }
-
     const context = chunks
       .map(
         (chunk, index) =>
@@ -754,32 +732,15 @@ export class AIRagService {
       ? `${systemPrompt}\n\nUse only the context for facts. If unsure, say you are unsure.\n\nCONTEXT:\n${context}`
       : `${systemPrompt}\n\nNo context was retrieved. Ask for clarification if needed.`;
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    const response = await axios.post<{
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    }>(endpoint, {
-      systemInstruction: {
-        parts: [{ text: effectiveSystemPrompt }],
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: query }],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.3,
-      },
+    const response = await this.ollamaAiService.generateText({
+      model:
+        model && !model.toLowerCase().includes('gemini') ? model : undefined,
+      systemPrompt: effectiveSystemPrompt,
+      userPrompt: query,
+      temperature: 0.3,
+      maxOutputTokens: 1200,
     });
-
-    const candidateParts = response.data.candidates?.[0]?.content?.parts;
-    return (
-      candidateParts
-        ?.map((part) => part.text || '')
-        .join('')
-        .trim() || ''
-    );
+    return response.text;
   }
 
   private computeKeywordCoverage(
@@ -860,56 +821,6 @@ export class AIRagService {
   }
 
   private async embedText(text: string): Promise<number[]> {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-    if (!apiKey) {
-      throw new InternalServerErrorException(
-        'Missing GEMINI_API_KEY on server',
-      );
-    }
-
-    const candidateModels = [
-      'models/gemini-embedding-001',
-      'models/text-embedding-004',
-    ];
-
-    let lastError: string | null = null;
-
-    for (const model of candidateModels) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/${model}:embedContent?key=${apiKey}`;
-
-      try {
-        const response = await axios.post<GeminiEmbeddingResponse>(endpoint, {
-          content: {
-            parts: [{ text }],
-          },
-        });
-
-        const values = response.data.embedding?.values;
-        if (!values || values.length === 0) {
-          throw new InternalServerErrorException(
-            'Gemini embedding returned empty vector',
-          );
-        }
-
-        return values;
-      } catch (error) {
-        const httpError = error as HttpErrorLike;
-        const status = httpError.response?.status;
-
-        // If model is unavailable, continue to next model candidate.
-        if (status === 404 || status === 400) {
-          lastError = `model ${model} unavailable (${status})`;
-          continue;
-        }
-
-        throw new InternalServerErrorException(
-          `Gemini embedding request failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        );
-      }
-    }
-
-    throw new InternalServerErrorException(
-      `Gemini embedding request failed: ${lastError || 'no embedding model available'}`,
-    );
+    return this.ollamaAiService.embedText(text);
   }
 }

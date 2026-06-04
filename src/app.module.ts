@@ -3,8 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import configuration from './config/config';
-
 import { TaskModule } from './modules/task/task.module';
 import { PersonalNoteModule } from './modules/personal-note/personal-note.module';
 import { NotificationModule } from './modules/notifications/notification.module';
@@ -28,6 +26,7 @@ import { EpicModule } from './modules/epic/epic.module';
 import { MilestoneModule } from './modules/milestone/milestone.module';
 
 import { WorkspaceMember } from './modules/workspace-member/entities/workspace-member.entity';
+import { WorkspaceJoinRequest } from './modules/workspace-member/entities/workspace-join-request.entity';
 import { Workspace } from './modules/workspace/entities/workspace.entity';
 import { TaskList } from './modules/task-list/entities/task-list.entity';
 import { TaskBoard } from './modules/task-board/entities/task-board.entity';
@@ -46,7 +45,8 @@ import { PersonalNote } from './modules/notes/entities/note.entity';
 import { NoteCategory } from './modules/notes/entities/note-category.entity';
 import { FriendRequest } from './modules/friend-request/entities/friend-request.entity';
 import { Friendship } from './modules/friendship/entities/friendship.entity';
-import { GroupConversation } from './modules/group-conversation/entities/group-conversation.entity';
+import { GroupConversation } from './modules/conversation/entities/group-conversation.entity';
+import { ConversationParticipant } from './modules/conversation/entities/conversation-participant.entity';
 import { GroupMember } from './modules/group-member/entities/group-member.entity';
 import { GroupInvite } from './modules/group-invite/entities/group-invite.entity';
 import { CalendarEvent } from './modules/calendar-event/entities/calendar-event.entity';
@@ -56,6 +56,7 @@ import { Document } from './modules/document/entities/document.entity';
 import { DocumentVersion } from './modules/document/entities/document-version.entity';
 import { InlineComment } from './modules/document/entities/inline-comment.entity';
 import { WorkspaceFile } from './modules/workspace-file/entities/workspace-file.entity';
+import { WorkspaceFileVersion } from './modules/workspace-file/entities/workspace-file-version.entity';
 import { Goal } from './modules/goal/entities/goal.entity';
 import { KeyResult } from './modules/goal/entities/key-result.entity';
 import { Sprint } from './modules/sprint/entities/sprint.entity';
@@ -67,32 +68,43 @@ import { WorkspaceMemberModule } from './modules/workspace-member/workspace-memb
 import { TaskBoardModule } from './modules/task-board/task-board.module';
 import { BoardColumnModule } from './modules/board-column/board-column.module';
 import { LabelModule } from './modules/label/label.module';
-import { Conversation } from './modules/conversation/entities/conversation.entity';
+import { Conversation } from './modules/conversation/entities/conversation.schema';
+import { ConversationModule } from './modules/conversation/conversation.module';
 import { CommonModule } from './common/common.module';
 import { FriendRequestModule } from './modules/friend-request/friend-request.module';
 import { GroupInviteModule } from './modules/group-invite/group-invite.module';
 import { FriendsModule } from './modules/friends/friends.module';
 import { PresenceModule } from './modules/presence/presence.module';
 import { CalendarEventModule } from './modules/calendar-event/calendar-event.module';
+import { UsersModule } from './modules/users/users.module';
+import { UserSettingsModule } from './modules/user-settings/user-settings.module';
+import { NotificationSettingsModule } from './modules/notification-settings/notification-settings.module';
+import { PrivacySettingsModule } from './modules/privacy-settings/privacy-settings.module';
+import { UserDevicesModule } from './modules/user-devices/user-devices.module';
+import { GroupsModule } from './modules/groups/groups.module';
+import { StreamVideoModule } from './modules/stream-video/stream-video.module';
+import { OrionAiModule } from './modules/orion-ai/orion-ai.module';
+import { UserSettings } from './modules/user-settings/entities/user-settings.entity';
+import { NotificationSettings } from './modules/notification-settings/entities/notification-settings.entity';
+import { PrivacySettings } from './modules/privacy-settings/entities/privacy-settings.entity';
+import { UserDevices } from './modules/user-devices/entities/user-devices.entity';
 
 @Module({
   imports: [
     // ENV config
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [configuration],
     }),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
-        url: configService.get<string>('database.url') || undefined,
-        host: configService.get<string>('database.host'),
-        port: configService.get<number>('database.port'),
-        username: configService.get<string>('database.username'),
-        password: configService.get<string>('database.password'),
-        database: configService.get<string>('database.database'),
+        host: configService.get<string>('DB_HOST') || 'localhost',
+        port: Number(configService.get<string>('DB_PORT') || 5432),
+        username: configService.get<string>('DB_USER') || 'postgres',
+        password: configService.get<string>('DB_PASSWORD') || '123456789',
+        database: configService.get<string>('DB_NAME') || 'orion_chat',
         entities: [
           User,
           Task,
@@ -101,11 +113,13 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
           TaskList,
           Workspace,
           WorkspaceMember,
+          WorkspaceJoinRequest,
           BoardColumn,
           Label,
           Report,
           Admin,
           Conversation,
+          ConversationParticipant,
           SubTask,
           Comment,
           Attachment,
@@ -124,14 +138,19 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
           DocumentVersion,
           InlineComment,
           WorkspaceFile,
+          WorkspaceFileVersion,
           Goal,
           KeyResult,
           Sprint,
           Epic,
           Milestone,
+          UserSettings,
+          NotificationSettings,
+          PrivacySettings,
+          UserDevices,
         ],
         autoLoadEntities: true,
-        synchronize: true,
+        synchronize: configService.get<string>('TYPEORM_SYNC') === 'true',
       }),
     }),
 
@@ -140,7 +159,7 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         uri:
-          configService.get<string>('mongodb.uri') ||
+          configService.get<string>('MONGO_URI') ||
           'mongodb://localhost:27017/orion_chat',
       }),
     }),
@@ -163,12 +182,14 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
     TaskBoardModule,
     BoardColumnModule,
     LabelModule,
+    ConversationModule,
     SubTaskModule,
     CommentModule,
     ActivityLogModule,
     AttachmentModule,
     NotesModule,
     FriendRequestModule,
+    UsersModule,
     GroupInviteModule,
     FriendsModule,
     PresenceModule,
@@ -180,6 +201,13 @@ import { CalendarEventModule } from './modules/calendar-event/calendar-event.mod
     SprintModule,
     EpicModule,
     MilestoneModule,
+    UserSettingsModule,
+    NotificationSettingsModule,
+    PrivacySettingsModule,
+    UserDevicesModule,
+    GroupsModule,
+    StreamVideoModule,
+    OrionAiModule,
   ],
 })
 export class AppModule {}
