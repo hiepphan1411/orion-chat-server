@@ -8,7 +8,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { CallService } from './call.service';
 import { CallType } from 'src/common/enums/call-type.enum';
 import { CallInitiateDto } from './dto/call-initiate.dto';
@@ -24,6 +24,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Message, MessageDocument } from '../message/message.schema';
 import { ChatGateway } from '../message/chat.gateway';
+import { PrivacyPolicyService } from '../privacy-settings/privacy-policy.service';
+import { NotificationSettingsService } from '../notification-settings/notification-settings.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ConversationParticipant } from '../conversation/entities/conversation-participant.entity';
 
 // map để tracking user online và socketId
 const onlineUsers = new Map<string, string>(); // userId -> socketId
@@ -99,7 +104,43 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
     private readonly chatGateway: ChatGateway,
+    private readonly privacyPolicyService: PrivacyPolicyService,
+    private readonly notificationSettingsService: NotificationSettingsService,
+    @InjectRepository(ConversationParticipant)
+    private readonly participantRepo: Repository<ConversationParticipant>,
   ) {}
+
+  private async canReceiveCallNotification(userId: string) {
+    const settings = await this.notificationSettingsService.findByUserId(userId);
+    return settings.muteAll !== true && settings.callNotifications !== false;
+  }
+
+  private async assertCanInitiateCall(
+    callerId: string,
+    receiverId: string,
+    conversationId: string,
+  ) {
+    const participants = await this.participantRepo.find({
+      where: { conversationId },
+    });
+    const blockedParticipant = participants.find((item) => item.isBlocked);
+
+    if (blockedParticipant) {
+      if (blockedParticipant.userId === callerId) {
+        throw new ForbiddenException(
+          `You are blocked from calling in this conversation. Blocked by: ${blockedParticipant.blockedBy}`,
+        );
+      }
+
+      if (blockedParticipant.blockedBy === callerId) {
+        throw new ForbiddenException(
+          'You blocked this user. Unblock them to call.',
+        );
+      }
+    }
+
+    await this.privacyPolicyService.assertCanCall(callerId, receiverId);
+  }
 
   private async completeActiveCallMessage(callId: string, duration: number) {
     try {
@@ -236,6 +277,8 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `Call initiated by ${callerId} to ${receiverId} (${callType})`,
       );
 
+      await this.assertCanInitiateCall(callerId, receiverId, conversationId);
+
       // kiểm tra receiver có online không
       const receiverSocketId = onlineUsers.get(receiverId);
       if (!receiverSocketId) {
@@ -247,6 +290,16 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // tạo call record trong database
+      const canNotifyReceiver =
+        await this.canReceiveCallNotification(receiverId);
+      if (!canNotifyReceiver) {
+        client.emit('call:error', {
+          message: 'This user has turned off call notifications.',
+          code: 'CALL_NOTIFICATIONS_DISABLED',
+        });
+        return;
+      }
+
       const call: CallDocument = await this.callService.createCall(
         conversationId,
         callType === 'video' ? CallType.ONE_TO_ONE : CallType.ONE_TO_ONE,
@@ -583,7 +636,6 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const groupCallId = call._id.toString();
 
       // Track active group call
-      const participants = new Set([initiatorId, ...participantIds]);
       const participantNameMap = new Map<string, string>();
       const participantAvatarMap = new Map<string, string>();
 
@@ -601,9 +653,19 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
         participantAvatarMap.set(id, participantAvatars?.[id] || '');
       }
 
+      const notifiedParticipantIds: string[] = [];
+      for (const id of participantIds) {
+        const participantSocketId = onlineUsers.get(id);
+        const canNotifyParticipant =
+          await this.canReceiveCallNotification(id);
+        if (participantSocketId && canNotifyParticipant) {
+          notifiedParticipantIds.push(id);
+        }
+      }
+
       activeGroupCalls.set(groupCallId, {
         initiatorId,
-        participants,
+        participants: new Set([initiatorId, ...notifiedParticipantIds]),
         conversationId,
         callType,
         participantNames: participantNameMap,
@@ -619,7 +681,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
           avatar: participantAvatarMap.get(initiatorId) || '',
           isHost: true,
         },
-        ...participantIds.map((id) => ({
+        ...notifiedParticipantIds.map((id) => ({
           id,
           name: participantNameMap.get(id) || `User ${id}`,
           avatar: participantAvatarMap.get(id) || '',
@@ -636,7 +698,7 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       // Send incoming call notifications to all participants
-      for (const participantId of participantIds) {
+      for (const participantId of notifiedParticipantIds) {
         const participantSocketId = onlineUsers.get(participantId);
         if (participantSocketId) {
           // Include all participant data (excluding themselves for client-side filtering)

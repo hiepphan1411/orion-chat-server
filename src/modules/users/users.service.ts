@@ -11,6 +11,8 @@ import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { S3UploadService } from 'src/common/services/s3-upload.service';
+import { PrivacyPolicyService } from '../privacy-settings/privacy-policy.service';
+import { PrivacySettingsService } from '../privacy-settings/privacy-settings.service';
 
 //Để test
 
@@ -33,6 +35,8 @@ export class UsersService {
     private userRepository: Repository<User>,
     private readonly configService: ConfigService,
     private readonly s3UploadService: S3UploadService,
+    private readonly privacyPolicyService: PrivacyPolicyService,
+    private readonly privacySettingsService: PrivacySettingsService,
   ) {}
 
   private toSafeUser(user: User) {
@@ -50,6 +54,31 @@ export class UsersService {
       isActive: user.isActive,
       createdAt: user.createdAt,
       lastLoginAt: user.lastLoginAt,
+    };
+  }
+
+  private async toVisibleUser(user: User, viewerId: string) {
+    const [canViewFullProfile, settings] = await Promise.all([
+      this.privacyPolicyService.canViewFullProfile(viewerId, user.userId),
+      this.privacySettingsService.findByUserId(user.userId),
+    ]);
+
+    const onlineStatusVisible =
+      viewerId === user.userId || settings.onlineStatusVisibility;
+
+    if (!canViewFullProfile) {
+      return {
+        userId: user.userId,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+        isOnline: onlineStatusVisible ? user.isOnline : false,
+        isActive: user.isActive,
+      };
+    }
+
+    return {
+      ...this.toSafeUser(user),
+      isOnline: onlineStatusVisible ? user.isOnline : false,
     };
   }
 
@@ -86,9 +115,18 @@ export class UsersService {
     return this.toSafeUser(savedUser);
   }
 
-  async findAll() {
+  async findAll(viewerId?: string) {
     const users = await this.userRepository.find();
-    return users.map((user) => this.toSafeUser(user));
+    if (!viewerId) {
+      return users.map((user) => ({
+        userId: user.userId,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+        isActive: user.isActive,
+      }));
+    }
+
+    return Promise.all(users.map((user) => this.toVisibleUser(user, viewerId)));
   }
 
   async getProfile(userId: string) {
